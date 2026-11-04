@@ -78,8 +78,8 @@
           <div class="lobby-grid">
             <div class="lobby-words">
               <h2>Jouw woorden</h2>
-              <p class="muted small">Typ woorden voor de pot, gescheiden door komma's of enters. Anderen tekenen ze — jij niet (als het kan).</p>
-              <textarea id="words-input" rows="6" maxlength="900" placeholder="fietsenrek, oma op de scooter, pannenkoek, ..."></textarea>
+              <p class="muted small">Typ tot 500 woorden, gescheiden door komma's of enters. Alleen jullie woorden worden getekend; anderen tekenen jouw woorden (als het kan). Is de pot leeg, dan gebruikt het spel ingebouwde woorden.</p>
+              <textarea id="words-input" rows="8" maxlength="16000" placeholder="fietsenrek, oma op de scooter, pannenkoek, ..."></textarea>
               <div class="words-row">
                 <button id="btn-words" class="btn">Opslaan</button>
                 <span id="words-saved" class="muted small"></span>
@@ -136,7 +136,6 @@
                     </select>
                   </label>
                 </div>
-                <label class="check"><input type="checkbox" id="set-builtin" checked> Ook ingebouwde Nederlandse woorden gebruiken</label>
                 <button id="btn-start" class="btn primary big">Start spel</button>
                 <p class="muted small" id="start-hint"></p>
               </div>

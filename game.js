@@ -16,8 +16,8 @@
     '#4fc3f7', '#1e88e5', '#283593', '#8e24aa', '#f06292', '#ffcdd2', '#795548', '#d7a86e', '#ffe0b2', '#26a69a'];
   const SIZES = [4, 10, 20, 36];
   const SHAPES = ['line', 'rect', 'ellipse'];
-  const MAX_WORDS_PER_PLAYER = 30;
-  const DEFAULT_SETTINGS = { rounds: 2, time: 80, builtin: true, choices: 3, hints: 3, mode: 'normal', max: 12 };
+  const MAX_WORDS_PER_PLAYER = 500;
+  const DEFAULT_SETTINGS = { rounds: 2, time: 80, choices: 3, hints: 3, mode: 'normal', max: 12 };
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
@@ -306,24 +306,20 @@
       return out;
     },
 
+    // Only the players' own words are used. Only when nobody entered any word
+    // does the game fall back to the built-in list.
     pickWords(drawerId) {
       const n = this.S.settings.choices;
-      const fresh = (w) => !this.used.has(compact(w));
-      const pot = this.customPot().filter((x) => fresh(x.w));
-      const others = shuffle(pot.filter((x) => x.by !== drawerId).map((x) => x.w));
-      const own = shuffle(pot.filter((x) => x.by === drawerId).map((x) => x.w));
-      const builtin = shuffle((window.BUILTIN_WORDS || []).filter(fresh));
-      const useBuiltin = this.S.settings.builtin;
+      const pot = this.customPot();
+      const source = pot.length ? pot : (window.BUILTIN_WORDS || []).map((w) => ({ w, by: null }));
+      const fresh = (x) => !this.used.has(compact(x.w));
+      const words = (list) => shuffle(list).map((x) => x.w);
       const out = [];
-      const add = (list, max) => { for (const w of list) { if (out.length >= max) break; if (!out.some((o) => compact(o) === compact(w))) out.push(w); } };
-      add(others, useBuiltin ? Math.max(1, n - 1) : n); // own words of others first, at least one built-in for variety
-      if (useBuiltin) add(builtin, n);
-      add(own, n); // only when nothing else is left
-      if (out.length < n) {
-        this.used.clear(); // pot is empty: allow words again
-        add(shuffle(this.customPot().filter((x) => x.by !== drawerId).map((x) => x.w)), n);
-        add(shuffle(window.BUILTIN_WORDS || []), n);
-      }
+      const add = (list) => { for (const w of list) { if (out.length >= n) break; if (!out.some((o) => compact(o) === compact(w))) out.push(w); } };
+      add(words(source.filter((x) => fresh(x) && x.by !== drawerId))); // unused words someone else came up with
+      add(words(source.filter((x) => fresh(x) && x.by === drawerId))); // then your own unused words
+      add(words(source.filter((x) => x.by !== drawerId))); // all used up: allow repeats
+      add(words(source));
       return out;
     },
 
@@ -331,7 +327,6 @@
     startGame() {
       const S = this.S;
       if (S.phase !== 'lobby' || this.online().length < 2) return;
-      if (!S.settings.builtin && this.customPot().length < 1) return this.toast('host', 'Voeg eerst woorden toe of zet de ingebouwde woorden aan.');
       S.players = S.players.filter((p) => p.on);
       S.players.forEach((p) => (p.score = 0));
       this.used.clear();
@@ -529,7 +524,6 @@
         hints: clampInt(s.hints, 0, 5, 3),
         mode: s.mode === 'hidden' ? 'hidden' : 'normal',
         max: clampInt(s.max, 2, 16, 12),
-        builtin: !!s.builtin,
       };
       this.broadcast();
     },
@@ -616,7 +610,7 @@
         rates: this.rateCounts(),
         myRate: S.rates[pid] || 0,
         myVotes: Object.keys(S.kickVotes).filter((t) => S.kickVotes[t].includes(pid)),
-        myWords: me ? me.words : [],
+        myWords: me && S.phase === 'lobby' ? me.words : [], // up to 500 words: only needed in the lobby
         pot: this.customPot().length,
       };
     },
@@ -1082,18 +1076,19 @@
       const lines = [
         'De host start het spel zodra iedereen er is.',
         `${s.rounds} ronde${s.rounds > 1 ? 's' : ''} · ${s.time} sec tekenen · ${s.choices} woordkeuze${s.choices > 1 ? 's' : ''}`,
-        `${s.mode === 'hidden' ? 'Verborgen woorden' : `${s.hints} hint${s.hints === 1 ? '' : 's'}`} · max ${s.max} spelers · ${s.builtin ? 'met' : 'zonder'} ingebouwde woorden`,
+        `${s.mode === 'hidden' ? 'Verborgen woorden' : `${s.hints} hint${s.hints === 1 ? '' : 's'}`} · max ${s.max} spelers`,
       ];
       for (const l of lines) { const p = document.createElement('p'); p.textContent = l; $('#guest-wait').appendChild(p); }
       $('#share-link').value = shareLink(this.code);
       const ta = $('#words-input');
       if (!this.wordsTouched && document.activeElement !== ta && v.myWords.length) ta.value = v.myWords.join(', ');
-      $('#words-saved').textContent = v.myWords.length ? `✓ ${v.myWords.length} woord${v.myWords.length === 1 ? '' : 'en'} opgeslagen` : '';
-      $('#pot-info').textContent = `🫙 Woordenpot: ${v.pot} eigen woord${v.pot === 1 ? '' : 'en'}${s.builtin ? ' + ingebouwde woorden' : ''}`;
+      $('#words-saved').textContent = v.myWords.length ? `✓ ${v.myWords.length} / ${MAX_WORDS_PER_PLAYER} woorden opgeslagen` : `max. ${MAX_WORDS_PER_PLAYER} woorden`;
+      $('#pot-info').textContent = v.pot
+        ? `🫙 Woordenpot: ${v.pot} woord${v.pot === 1 ? '' : 'en'} — alleen deze woorden worden getekend`
+        : '🫙 Woordenpot is leeg — er worden ingebouwde woorden gebruikt';
       const enough = v.players.filter((p) => p.on).length >= 2;
-      const hasWords = s.builtin || v.pot > 0;
-      $('#btn-start').disabled = !enough || !hasWords;
-      $('#start-hint').textContent = !enough ? 'Minimaal 2 spelers nodig.' : !hasWords ? 'Voeg woorden toe of zet de ingebouwde woorden aan.' : '';
+      $('#btn-start').disabled = !enough;
+      $('#start-hint').textContent = enough ? '' : 'Minimaal 2 spelers nodig.';
     },
 
     renderBoard(v, isDrawer) {
@@ -1523,7 +1518,7 @@
     $('#words-input').addEventListener('input', () => (Client.wordsTouched = true));
     $('#words-input').addEventListener('blur', () => { if (Client.wordsTouched) saveWords(); });
 
-    const settingIds = ['rounds', 'time', 'choices', 'hints', 'mode', 'max', 'builtin'];
+    const settingIds = ['rounds', 'time', 'choices', 'hints', 'mode', 'max'];
     const sendSettings = () => {
       const m = { t: 'settings' };
       for (const k of settingIds) { const el = $('#set-' + k); m[k] = el.type === 'checkbox' ? el.checked : el.value; }

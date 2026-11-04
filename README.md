@@ -5,8 +5,9 @@ Speel het op **https://kevinboogaard.github.io/tekenen/**
 
 ## Spel
 - Kies een avatar (emoji + kleur), maak een spel en deel de code of link.
-- In de lobby voegt iedereen eigen woorden toe aan de woordenpot,
-  optioneel aangevuld met ~250 ingebouwde Nederlandse woorden.
+- In de lobby voegt iedereen tot 500 eigen woorden toe aan de woordenpot.
+  Alleen die woorden worden getekend. Is de pot leeg, dan gebruikt het spel
+  ~250 ingebouwde Nederlandse woorden.
 - Om de beurt kies je een woord en teken je het. Je krijgt bij voorkeur
   woorden die iemand anders heeft bedacht.
 - De rest raadt via de chat: hoe sneller, hoe meer punten (100–300).
@@ -17,7 +18,7 @@ Speel het op **https://kevinboogaard.github.io/tekenen/**
 
 ## Instellingen (host)
 Rondes (1–10) · tekentijd (30–180 s) · aantal woordkeuzes (1–5) · aantal hints (0–5) ·
-woordmodus normaal/verborgen · max. spelers (2–16) · ingebouwde woorden aan/uit.
+woordmodus normaal/verborgen · max. spelers (2–16).
 
 ## Tekengereedschap
 20 kleuren + eigen kleur · 4 diktes · pen · gum · emmer · lijn · rechthoek · ellips ·
