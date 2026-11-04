@@ -5,6 +5,7 @@
 (() => {
   'use strict';
 
+  const VERSION = 5; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   const CHOOSE_SECONDS = 15;
   const TURN_END_MS = 6000;
@@ -587,6 +588,7 @@
       const me = this.p(pid);
       return {
         t: 'state',
+        ver: VERSION,
         me: pid,
         phase: S.phase,
         players: S.players.map((p) => ({
@@ -971,6 +973,14 @@
       this.v = v;
       this.me = v.me;
       const isDrawer = v.drawerId === v.me;
+
+      // the host's browser runs the rules (e.g. the word limit): warn if it runs an older version
+      if (!this.isHost && !this.versionWarned && (v.ver || 0) < VERSION) {
+        this.versionWarned = true;
+        const warn = () => toast('⚠️ De host gebruikt een oude versie van het spel. Vraag de host de pagina te verversen (Ctrl+F5) en een nieuw spel te maken.');
+        warn();
+        setTimeout(warn, 3000);
+      }
 
       // keep a picture of every finished drawing for the gallery
       if (prev && prev.phase === 'drawing' && v.phase === 'turnEnd' && v.result && v.result.word) this.snapshot(v);
