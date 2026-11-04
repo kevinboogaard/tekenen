@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 5; // keep in sync with the ?v= in index.html
+  const VERSION = 6; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   const CHOOSE_SECONDS = 15;
   const TURN_END_MS = 6000;
@@ -521,7 +521,7 @@
       this.S.settings = {
         rounds: clampInt(s.rounds, 1, 10, 2),
         time: clampInt(s.time, 30, 180, 80),
-        choices: clampInt(s.choices, 1, 5, 3),
+        choices: clampInt(s.choices, 1, 10, 3),
         hints: clampInt(s.hints, 0, 5, 3),
         mode: s.mode === 'hidden' ? 'hidden' : 'normal',
         max: clampInt(s.max, 2, 16, 12),
@@ -1085,7 +1085,7 @@
       $('#guest-wait').innerHTML = '';
       const lines = [
         'De host start het spel zodra iedereen er is.',
-        `${s.rounds} ronde${s.rounds > 1 ? 's' : ''} · ${s.time} sec tekenen · ${s.choices} woordkeuze${s.choices > 1 ? 's' : ''}`,
+        `${s.choices} woordoptie${s.choices > 1 ? 's' : ''} per beurt · ${s.rounds} ronde${s.rounds > 1 ? 's' : ''} · ${s.time} sec tekenen`,
         `${s.mode === 'hidden' ? 'Verborgen woorden' : `${s.hints} hint${s.hints === 1 ? '' : 's'}`} · max ${s.max} spelers`,
       ];
       for (const l of lines) { const p = document.createElement('p'); p.textContent = l; $('#guest-wait').appendChild(p); }

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Bump ?v= on every release so browsers never run a cached older version -->
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <!-- ========== HOME ========== -->
@@ -42,7 +42,7 @@
       </div>
 
       <p id="home-error" class="error" role="alert"></p>
-      <p class="version muted small">versie 5 · tot 500 woorden per speler</p>
+      <p class="version muted small">versie 6 · tot 500 woorden per speler</p>
     </div>
     <details class="how">
       <summary>Hoe werkt het?</summary>
@@ -96,6 +96,21 @@
                 <button id="btn-copy2" class="btn">Kopieer</button>
               </div>
               <div id="host-settings" class="settings">
+                <label class="setting-main">Woordopties per beurt
+                  <span class="muted small">Uit hoeveel woorden de tekenaar mag kiezen</span>
+                  <select id="set-choices">
+                    <option value="1">1 woord (geen keuze)</option>
+                    <option value="2">2 woorden</option>
+                    <option value="3" selected>3 woorden</option>
+                    <option value="4">4 woorden</option>
+                    <option value="5">5 woorden</option>
+                    <option value="6">6 woorden</option>
+                    <option value="7">7 woorden</option>
+                    <option value="8">8 woorden</option>
+                    <option value="9">9 woorden</option>
+                    <option value="10">10 woorden</option>
+                  </select>
+                </label>
                 <div class="settings-grid">
                   <label>Rondes
                     <select id="set-rounds">
@@ -113,11 +128,6 @@
                       <option value="120">120 sec</option>
                       <option value="150">150 sec</option>
                       <option value="180">180 sec</option>
-                    </select>
-                  </label>
-                  <label>Woordkeuzes
-                    <select id="set-choices">
-                      <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
                     </select>
                   </label>
                   <label>Hints
@@ -229,7 +239,7 @@
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="words.js?v=5"></script>
-  <script src="game.js?v=5"></script>
+  <script src="words.js?v=6"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>

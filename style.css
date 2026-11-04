@@ -205,6 +205,9 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 
 /* settings grid */
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.settings label.setting-main { padding: 10px 12px; border: 2.5px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); font-size: 1.05rem; }
+.settings label.setting-main .muted { font-weight: 400; margin-top: -2px; }
+.choices .btn { padding: .45em .9em; }
 
 /* wordbar actions */
 .wordbar-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 200px; }

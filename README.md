@@ -17,7 +17,7 @@ Speel het op **https://kevinboogaard.github.io/tekenen/**
 - Geef een tekening 👍 of 👎. Aan het eind: podium + galerij met alle tekeningen (downloadbaar).
 
 ## Instellingen (host)
-Rondes (1–10) · tekentijd (30–180 s) · aantal woordkeuzes (1–5) · aantal hints (0–5) ·
+Rondes (1–10) · tekentijd (30–180 s) · woordopties per beurt (1–10) · aantal hints (0–5) ·
 woordmodus normaal/verborgen · max. spelers (2–16).
 
 ## Tekengereedschap
