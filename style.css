@@ -184,6 +184,53 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .confetti { position: fixed; top: -12px; width: 10px; height: 14px; z-index: 15; pointer-events: none; animation: fall linear forwards; }
 @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
 
+/* ---------- avatars ---------- */
+.avatar { font-size: 1rem; line-height: 1; }
+.avatar.huge { width: 84px; height: 84px; font-size: 2.8rem; border-width: 3px; flex: none; box-shadow: var(--shadow); }
+.avatar-picker { display: flex; gap: 16px; align-items: center; margin-bottom: 1.2em; }
+.av-options { flex: 1; min-width: 0; display: grid; gap: 8px; }
+.av-emojis { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.av-emojis button { font-size: 1.15rem; padding: 2px 0; background: none; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.av-emojis button.active { border-color: var(--line); background: var(--turn); }
+.av-colors { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.av-colors button { aspect-ratio: 1; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+.av-colors button.active { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* players: kick */
+#player-list .kick { background: none; border: none; cursor: pointer; font-size: .95rem; padding: 0 2px; opacity: 0; transition: opacity .15s; }
+#player-list li:hover .kick, #player-list .kick:focus-visible { opacity: .85; }
+#player-list .votes { font-size: .75rem; color: var(--bad); font-weight: 600; }
+@media (hover: none) { #player-list .kick { opacity: .6; } }
+
+/* settings grid */
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* wordbar actions */
+.wordbar-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 200px; }
+.wordbar-actions .chip { padding: .25em .6em; }
+.chip.rate.active { background: var(--turn); color: #23262b; }
+.chip[hidden] { display: none; }
+.ov-sub { font-size: .9rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+.rate-sum { margin-top: 8px; color: var(--muted); }
+
+/* preview canvas for shapes */
+#preview { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.tool svg { width: 22px; height: 22px; fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linecap: round; }
+.color-block { display: flex; gap: 6px; align-items: center; }
+.custom-color { position: relative; width: 42px; height: 42px; border: 2.5px solid var(--line); border-radius: 10px; display: grid; place-items: center; cursor: pointer; box-shadow: 2px 2px 0 var(--line); background: var(--panel); font-size: 1.2rem; }
+.custom-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; padding: 0; border: 0; }
+.custom-color.active { background: var(--turn); }
+
+/* gallery */
+.gallery-title { margin-top: 28px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; width: 100%; }
+.gallery .card { border: 2.5px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); box-shadow: var(--shadow); text-align: left; }
+.gallery img { width: 100%; display: block; aspect-ratio: 4 / 3; background: #fff; border-bottom: 2px solid var(--line); }
+.gallery .meta { padding: 6px 8px; font-size: .85rem; display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.gallery .meta b { display: block; font-size: .95rem; }
+.gallery a { text-decoration: none; font-size: 1.1rem; }
+.overlay-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 1000px) {
   .layout { grid-template-columns: 1fr 1fr; }
@@ -204,5 +251,9 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
   .tool { width: 38px; height: 38px; }
   .chat { height: 300px; }
   .players { order: 1; } /* on phones: drawing, then chat, then players */
+  .wordbar { flex-wrap: wrap; }
+  .wordbar-actions { max-width: none; width: 100%; justify-content: center; order: 3; }
+  .avatar.huge { width: 64px; height: 64px; font-size: 2.1rem; }
+  .settings-grid { grid-template-columns: 1fr; }
   .podium .step { width: 90px; }
 }

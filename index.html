@@ -18,6 +18,14 @@
       <h1 class="logo">Teken <span>&amp;</span> Raad</h1>
       <p class="tagline">Jij tekent. Zij raden. Met jullie eigen woorden.</p>
 
+      <div class="avatar-picker">
+        <div id="av-preview" class="avatar huge"></div>
+        <div class="av-options">
+          <div id="av-emojis" class="av-emojis"></div>
+          <div id="av-colors" class="av-colors"></div>
+        </div>
+      </div>
+
       <label class="field">
         <span>Jouw naam</span>
         <input id="name-input" maxlength="16" placeholder="bijv. Kevin" autocomplete="nickname">
@@ -39,9 +47,10 @@
       <ul>
         <li>Maak een spel en deel de code of link met je vrienden.</li>
         <li>In de lobby voegt iedereen eigen woorden toe aan de woordenpot.</li>
-        <li>Om de beurt kies je 1 van 3 woorden en teken je het.</li>
+        <li>Om de beurt kies je een woord en teken je het.</li>
         <li>De rest raadt via de chat. Hoe sneller je het raadt, hoe meer punten!</li>
         <li>De tekenaar krijgt punten voor iedereen die het raadt.</li>
+        <li>Geef tekeningen een 👍 of 👎 en bekijk ze terug in de galerij.</li>
       </ul>
     </details>
   </section>
@@ -59,7 +68,7 @@
 
     <main class="layout">
       <aside class="panel players">
-        <h2>Spelers</h2>
+        <h2>Spelers <span id="player-count" class="muted small"></span></h2>
         <ol id="player-list"></ol>
       </aside>
 
@@ -85,25 +94,53 @@
                 <button id="btn-copy2" class="btn">Kopieer</button>
               </div>
               <div id="host-settings" class="settings">
-                <label>Rondes
-                  <select id="set-rounds">
-                    <option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option>
-                  </select>
-                </label>
-                <label>Tekentijd
-                  <select id="set-time">
-                    <option value="60">60 sec</option>
-                    <option value="80" selected>80 sec</option>
-                    <option value="100">100 sec</option>
-                    <option value="120">120 sec</option>
-                    <option value="150">150 sec</option>
-                  </select>
-                </label>
+                <div class="settings-grid">
+                  <label>Rondes
+                    <select id="set-rounds">
+                      <option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option>
+                      <option>6</option><option>8</option><option>10</option>
+                    </select>
+                  </label>
+                  <label>Tekentijd
+                    <select id="set-time">
+                      <option value="30">30 sec</option>
+                      <option value="45">45 sec</option>
+                      <option value="60">60 sec</option>
+                      <option value="80" selected>80 sec</option>
+                      <option value="100">100 sec</option>
+                      <option value="120">120 sec</option>
+                      <option value="150">150 sec</option>
+                      <option value="180">180 sec</option>
+                    </select>
+                  </label>
+                  <label>Woordkeuzes
+                    <select id="set-choices">
+                      <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+                    </select>
+                  </label>
+                  <label>Hints
+                    <select id="set-hints">
+                      <option>0</option><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+                    </select>
+                  </label>
+                  <label>Woordmodus
+                    <select id="set-mode">
+                      <option value="normal" selected>Normaal</option>
+                      <option value="hidden">Verborgen (geen lengte, geen hints)</option>
+                    </select>
+                  </label>
+                  <label>Max. spelers
+                    <select id="set-max">
+                      <option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+                      <option>8</option><option>10</option><option selected>12</option><option>16</option>
+                    </select>
+                  </label>
+                </div>
                 <label class="check"><input type="checkbox" id="set-builtin" checked> Ook ingebouwde Nederlandse woorden gebruiken</label>
                 <button id="btn-start" class="btn primary big">Start spel</button>
                 <p class="muted small" id="start-hint"></p>
               </div>
-              <p id="guest-wait" class="muted"></p>
+              <div id="guest-wait" class="muted"></div>
             </div>
           </div>
         </div>
@@ -116,26 +153,42 @@
               <div id="word-label" class="word-label"></div>
               <div id="word-mask" class="word-mask"></div>
             </div>
+            <div class="wordbar-actions">
+              <button id="btn-like" class="chip rate" title="Leuke tekening">👍 <span id="like-n">0</span></button>
+              <button id="btn-dislike" class="chip rate" title="Niet zo'n leuke tekening">👎 <span id="dislike-n">0</span></button>
+              <button id="btn-save" class="chip icon" title="Tekening downloaden">💾</button>
+              <button id="btn-skip" class="chip icon" title="Beurt overslaan (host)">⏭️</button>
+            </div>
           </div>
           <div class="canvas-wrap">
             <canvas id="canvas" width="800" height="600"></canvas>
+            <canvas id="preview" width="800" height="600"></canvas>
             <div id="board-overlay" class="board-overlay">
               <div class="board-overlay-card">
+                <div id="ov-sub" class="ov-sub"></div>
                 <h2 id="ov-title"></h2>
                 <div id="ov-body"></div>
               </div>
             </div>
           </div>
           <div id="toolbar" class="toolbar">
-            <div id="colors" class="colors"></div>
+            <div class="color-block">
+              <div id="colors" class="colors"></div>
+              <label class="custom-color" title="Eigen kleur"><input type="color" id="color-input" value="#000000"><span>🎨</span></label>
+            </div>
             <div class="tool-group" id="sizes"></div>
             <div class="tool-group">
-              <button class="tool" data-tool="pen" title="Pen">✏️</button>
-              <button class="tool" data-tool="eraser" title="Gum">🧽</button>
-              <button class="tool" data-tool="fill" title="Emmer (vullen)">🪣</button>
+              <button class="tool" data-tool="pen" title="Pen (B)">✏️</button>
+              <button class="tool" data-tool="eraser" title="Gum (E)">🧽</button>
+              <button class="tool" data-tool="fill" title="Emmer (F)">🪣</button>
+              <button class="tool" data-tool="line" title="Lijn (L)"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
+              <button class="tool" data-tool="rect" title="Rechthoek (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
+              <button class="tool" data-tool="ellipse" title="Ellips (O)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></svg></button>
+              <button class="tool" data-tool="picker" title="Pipet — kleur oppakken (I)">💧</button>
             </div>
             <div class="tool-group">
               <button id="btn-undo" class="tool" title="Ongedaan maken (Ctrl+Z)">↩️</button>
+              <button id="btn-redo" class="tool" title="Opnieuw (Ctrl+Y)">↪️</button>
               <button id="btn-clear" class="tool" title="Alles wissen">🗑️</button>
             </div>
           </div>
@@ -147,6 +200,8 @@
           <div id="podium" class="podium"></div>
           <button id="btn-again" class="btn primary big">Opnieuw spelen</button>
           <p id="again-wait" class="muted">Wachten tot de host een nieuw spel start…</p>
+          <h2 class="gallery-title">🖼️ Galerij</h2>
+          <div id="gallery" class="gallery"></div>
         </div>
       </div>
 
@@ -162,7 +217,15 @@
   </section>
 
   <div id="toast" class="toast"></div>
-  <div id="overlay" class="overlay"><div class="overlay-card"><p id="overlay-text"></p><button class="btn primary" onclick="location.href=location.pathname">Terug naar start</button></div></div>
+  <div id="overlay" class="overlay">
+    <div class="overlay-card">
+      <p id="overlay-text"></p>
+      <div class="overlay-actions">
+        <button id="btn-reconnect" class="btn primary">Opnieuw verbinden</button>
+        <button class="btn" onclick="location.href=location.pathname">Terug naar start</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="words.js"></script>
