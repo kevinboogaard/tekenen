@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 9; // keep in sync with the ?v= in index.html
+  const VERSION = 10; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -19,6 +19,7 @@
     },
   };
   const ALIVE_TIMEOUT_MS = 30000; // no message for this long: the host marks a player as gone
+  const HOST_QUIET_MS = 12000; // no answer from the host for this long: a guest connects anew
   const JOIN_RETRY_MS = 4000;
   const CONNECT_TIMEOUT_MS = 15000;
   const RECONNECT_FOR_MS = 120000; // a guest who lost the host keeps trying this long
@@ -250,6 +251,7 @@
     // a player who lost connection comes back with the same token: keep score
     restorePlayer(p, newId, avatar) {
       const old = p.id;
+      const wasOn = p.on;
       p.id = newId;
       p.on = true;
       if (avatar) p.avatar = cleanAvatar(avatar);
@@ -258,9 +260,9 @@
       S.guessedIds = S.guessedIds.map((x) => (x === old ? newId : x));
       if (S.drawerId === old) S.drawerId = newId;
       this.lastSeen.set(newId, Date.now());
+      if (wasOn) return; // only the connection changed: nobody needs to hear about it
       this.say(`${p.name} is terug!`);
       this.event('join');
-      if (S.phase !== 'lobby' && S.phase !== 'gameOver' && !S.queue.includes(newId)) S.queue.push(newId);
     },
 
     removePlayer(id) {
@@ -615,14 +617,15 @@
       if (token && this.banned.has(token)) return refuse('kicked');
       if (this.p(id)) return;
       const back = token && this.S.players.find((p) => p.token === token && p.id !== 'host');
-      if (back && back.on) {
-        // same tab reconnected before we noticed it was gone: drop the old connection
-        const old = this.conns.get(back.id);
+      if (back) {
+        // Same tab reconnected, possibly before we noticed it was gone. Move the player to the
+        // new connection first: closing the old one counts as leaving for whoever still holds it.
+        const old = back.on ? this.conns.get(back.id) : null;
         this.conns.delete(back.id);
         this.lastSeen.delete(back.id);
+        this.restorePlayer(back, id, m.avatar);
         try { old && old.close(); } catch { /* ignore */ }
       }
-      if (back) this.restorePlayer(back, id, m.avatar);
       else if (this.online().length >= this.S.settings.max) return refuse('full');
       else this.addPlayer(id, m.name, m.avatar, token);
       this.broadcast();
@@ -1151,9 +1154,7 @@
     // One connection attempt. Reports 'notfound' (no such room right now), 'timeout' (the room
     // exists but no connection comes up: usually the network) or 'server' (spelserver unreachable).
     connect(onOpen, onFail) {
-      try { this.peer && this.peer.destroy(); } catch { /* ignore */ }
       const peer = new Peer(PEER_OPTIONS);
-      this.peer = peer;
       let settled = false;
       let signalled = false;
       const fail = (kind) => {
@@ -1174,6 +1175,11 @@
           clearTimeout(timer);
           this.lastPong = Date.now();
           conn.send({ t: 'join', name: this.joinName, avatar: this.joinAvatar, token: myToken() });
+          // The old connection goes only now: the host hands our place straight to this new one.
+          // Dropping it first would make us "leave", which ends a two-player game.
+          const old = this.peer;
+          this.peer = peer;
+          try { old && old.destroy(); } catch { /* ignore */ }
           onOpen();
         });
         conn.on('data', (m) => { if (this.conn === conn) this.receive(m); });
@@ -1215,12 +1221,12 @@
     checkHost() {
       if (this.gone || this.reconnecting) return;
       this.send({ t: 'ping' });
-      if (Date.now() - this.lastPong <= 20000) return;
+      if (Date.now() - this.lastPong <= HOST_QUIET_MS) return;
       // quiet for a while (e.g. this tab was frozen): the connection may still be fine, so give
       // the ping a moment to get an answer before building a new one
       clearTimeout(this.graceTimer);
       this.graceTimer = setTimeout(() => {
-        if (Date.now() - this.lastPong > 20000) this.connectionLost();
+        if (Date.now() - this.lastPong > HOST_QUIET_MS) this.connectionLost();
       }, 3000);
     },
 
@@ -1241,6 +1247,9 @@
         this.connect(() => {
           this.reconnecting = false;
           setBanner('');
+          // the host may have dropped us, words and all: hand over what is in the box again
+          const words = parseWords($('#words-input').value);
+          if (words.length) this.send({ t: 'words', list: words });
         }, () => setTimeout(retry, JOIN_RETRY_MS));
       };
       retry();
