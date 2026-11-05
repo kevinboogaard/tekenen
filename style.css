@@ -234,6 +234,10 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .gallery a { text-decoration: none; font-size: 1.1rem; }
 .overlay-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
+/* connection status */
+.net-banner { display: none; position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 25; width: max-content; max-width: calc(100% - 32px); padding: 8px 14px; border: 2.5px solid var(--line); border-radius: 12px; background: var(--turn); color: #23262b; font-weight: 500; text-align: center; box-shadow: var(--shadow); }
+.net-banner.show { display: block; }
+
 /* live reactions */
 .reactions { display: none; gap: 4px; margin-top: 10px; }
 .reactions.show { display: flex; }

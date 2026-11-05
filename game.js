@@ -5,8 +5,23 @@
 (() => {
   'use strict';
 
-  const VERSION = 7; // keep in sync with the ?v= in index.html
+  const VERSION = 8; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
+  // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
+  const PEER_OPTIONS = {
+    debug: 1,
+    config: {
+      iceServers: [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+        { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+      ],
+      sdpSemantics: 'unified-plan',
+    },
+  };
+  const ALIVE_TIMEOUT_MS = 30000; // no message for this long: the host marks a player as gone
+  const JOIN_RETRY_MS = 4000;
+  const CONNECT_TIMEOUT_MS = 15000;
+  const RECONNECT_FOR_MS = 120000; // a guest who lost the host keeps trying this long
   const CHOOSE_SECONDS = 15;
   const TURN_END_MS = 6000;
   const W = 800, H = 600;
@@ -221,10 +236,12 @@
       const base = name;
       let n = 2;
       while (this.S.players.some((p) => p.on && p.name.toLowerCase() === name.toLowerCase())) name = `${base} ${n++}`;
-      this.S.players.push({ id, token: String(token || randId()), name, score: 0, on: true, avatar: cleanAvatar(avatar), words: [], stats: newStats() });
+      // someone joining on the end screen plays from the next game on, and isn't on this podium
+      const late = this.S.phase === 'gameOver';
+      this.S.players.push({ id, token: String(token || randId()), name, score: 0, on: true, late, avatar: cleanAvatar(avatar), words: [], stats: newStats() });
       this.lastSeen.set(id, Date.now());
       if (id !== 'host') {
-        this.say(`${name} doet mee`);
+        this.say(late ? `${name} doet mee en wacht op een nieuw spel` : `${name} doet mee`);
         this.event('join');
         if (this.S.phase !== 'lobby' && this.S.phase !== 'gameOver') this.S.queue.push(id);
       }
@@ -257,7 +274,8 @@
       const S = this.S;
       delete S.kickVotes[id];
       for (const t in S.kickVotes) S.kickVotes[t] = S.kickVotes[t].filter((v) => v !== id);
-      if (S.phase === 'lobby') S.players = S.players.filter((x) => x.id !== id);
+      // in the lobby a player stays on file (hidden) until the game starts: if they come back
+      // their words are still there
       if (S.phase === 'choosing' || S.phase === 'drawing') {
         if (this.online().length < 2) return this.backToLobby('Te weinig spelers over — terug naar de lobby.');
         if (S.drawerId === id) return this.endTurn('drawerLeft');
@@ -268,7 +286,7 @@
 
     checkAlive() {
       const now = Date.now();
-      for (const [id, t] of this.lastSeen) if (id !== 'host' && now - t > 16000) this.removePlayer(id);
+      for (const [id, t] of this.lastSeen) if (id !== 'host' && now - t > ALIVE_TIMEOUT_MS) this.removePlayer(id);
     },
 
     // ---- kicking
@@ -301,11 +319,13 @@
     customPot() {
       const seen = new Set();
       const out = [];
-      for (const p of this.S.players)
+      for (const p of this.S.players) {
+        if (this.S.phase === 'lobby' && !p.on) continue; // not back yet: don't count these words
         for (const w of p.words) {
           const k = compact(w);
           if (!seen.has(k)) { seen.add(k); out.push({ w, by: p.id }); }
         }
+      }
       return out;
     },
 
@@ -331,7 +351,7 @@
       const S = this.S;
       if (S.phase !== 'lobby' || this.online().length < 2) return;
       S.players = S.players.filter((p) => p.on);
-      S.players.forEach((p) => { p.score = 0; p.stats = newStats(); });
+      S.players.forEach((p) => { p.score = 0; p.late = false; p.stats = newStats(); });
       S.awards = [];
       this.used.clear();
       S.kickVotes = {};
@@ -554,7 +574,7 @@
       this.S.phase = 'gameOver';
       this.S.drawerId = null;
       this.S.awards = this.computeAwards();
-      const best = this.online().sort((a, b) => b.score - a.score)[0]; // players who left or were kicked can't win
+      const best = this.online().filter((p) => !p.late).sort((a, b) => b.score - a.score)[0]; // players who left or were kicked can't win
       if (best) this.say(`${best.name} wint het spel met ${best.score} punten! 🏆`, 'good');
       this.event('gameover');
       this.broadcast();
@@ -649,7 +669,7 @@
         me: pid,
         phase: S.phase,
         players: S.players.map((p) => ({
-          id: p.id, name: p.name, score: p.score, on: p.on, avatar: p.avatar,
+          id: p.id, name: p.name, score: p.score, on: p.on, late: !!p.late, avatar: p.avatar,
           guessed: S.guessedIds.includes(p.id), words: p.words.length,
           votes: (S.kickVotes[p.id] || []).length,
         })),
@@ -680,28 +700,90 @@
       if (c && c.open) { try { c.send(msg); } catch { /* ignore */ } }
     },
     toast(id, text) { this.send(id, { t: 'toast', text }); },
-    broadcast() { for (const p of this.S.players) if (p.on) this.send(p.id, this.view(p.id)); },
+    broadcast() {
+      for (const p of this.S.players) if (p.on) this.send(p.id, this.view(p.id));
+      clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => this.save(), 500);
+    },
 
-    open(name, avatar, onReady, onError) {
+    // Keep the room in this tab's storage, so a refresh by the host doesn't end it.
+    save() {
+      if (!this.code) return;
+      const S = this.S;
+      try {
+        sessionStorage.setItem(HOST_KEY, JSON.stringify({
+          code: this.code,
+          settings: S.settings,
+          banned: [...this.banned],
+          players: S.players.map(({ token, name, avatar, words }) => ({ token, name, avatar, words })),
+        }));
+      } catch { /* storage full or blocked: only the refresh recovery is lost */ }
+    },
+    restore(saved) {
+      const S = this.S;
+      if (saved.settings) S.settings = { ...S.settings, ...saved.settings };
+      this.banned = new Set(saved.banned || []);
+      for (const sp of saved.players || []) {
+        if (sp.token === 'host') { S.players[0].words = sp.words || []; continue; }
+        // offline until they reconnect with their token; dropped at the next game start otherwise
+        S.players.push({ id: 'old-' + sp.token, token: sp.token, name: sp.name, score: 0, on: false, late: false, avatar: cleanAvatar(sp.avatar), words: sp.words || [], stats: newStats() });
+      }
+      this.say('De host heeft de pagina ververst — terug in de lobby.');
+    },
+
+    // The link to the PeerJS server is only needed so that NEW players can find this room.
+    // Current players stay connected without it, so keep trying calmly in the background.
+    scheduleReconnect(peer) {
+      setBanner('⚠️ Geen verbinding met de spelserver: nieuwe spelers kunnen even niet meedoen. Wordt hersteld…');
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = setTimeout(() => this.reconnectNow(peer), 2000);
+    },
+    reconnectNow(peer = this.peer) {
+      if (!peer || peer.destroyed || !peer.disconnected) return;
+      clearTimeout(this.reconnectTimer);
+      try { peer.reconnect(); } catch { /* the next 'disconnected' event tries again */ }
+    },
+    // A player we had written off (e.g. a frozen phone tab) is talking again on the same connection.
+    revive(p, conn) {
+      this.conns.set(conn.peer, conn);
+      this.restorePlayer(p, conn.peer);
+      this.broadcast();
+      this.send(conn.peer, { t: 'sync', turn: this.S.turnNo, log: this.log });
+    },
+
+    open(name, avatar, onReady, onError, resume = null) {
       this.init(name, avatar);
+      if (resume) this.restore(resume);
       let attempts = 0;
       const tryOpen = () => {
-        const code = makeCode();
-        const peer = new Peer(PREFIX + code, { debug: 1 });
-        peer.on('open', () => { this.peer = peer; onReady(code); });
-        peer.on('error', (err) => {
-          if (err.type === 'unavailable-id' && attempts++ < 5) { peer.destroy(); tryOpen(); }
-          else if (!this.peer) onError(err);
-          else console.warn('peer error', err);
+        const code = resume ? resume.code : makeCode();
+        const peer = new Peer(PREFIX + code, PEER_OPTIONS);
+        peer.on('open', () => {
+          this.peer = peer;
+          this.code = code;
+          setBanner('');
+          onReady(code);
         });
-        peer.on('disconnected', () => { try { peer.reconnect(); } catch { /* ignore */ } });
+        peer.on('error', (err) => {
+          if (this.peer) return console.warn('peer error', err);
+          // after a refresh the server can hold on to the old room id for a little while
+          if (err.type === 'unavailable-id' && attempts++ < (resume ? 20 : 5)) {
+            peer.destroy();
+            setTimeout(tryOpen, resume ? 3000 : 0);
+          } else onError(err);
+        });
+        peer.on('disconnected', () => { if (this.peer === peer) this.scheduleReconnect(peer); });
         peer.on('connection', (conn) => {
           conn.on('data', (m) => {
             if (m && m.t === 'join') this.conns.set(conn.peer, conn);
+            else {
+              const p = this.p(conn.peer);
+              if (p && !p.on && !this.banned.has(p.token)) this.revive(p, conn);
+            }
             this.handle(conn.peer, m, conn);
           });
           conn.on('close', () => this.removePlayer(conn.peer));
-          conn.on('error', () => this.removePlayer(conn.peer));
+          conn.on('error', (err) => console.warn('connection error', err)); // the alive check decides who is gone
         });
       };
       tryOpen();
@@ -1062,39 +1144,109 @@
       if (this.conn && this.conn.open) this.conn.send(m);
     },
 
-    join(code, name, avatar, onError) {
-      this.code = code;
-      this.onJoinError = onError;
-      const peer = new Peer({ debug: 1 });
-      let joined = false;
-      const fail = (msg) => { if (!joined) { onError(msg); try { peer.destroy(); } catch { /* ignore */ } } };
-      const timeout = setTimeout(() => fail('Kan de kamer niet bereiken. Klopt de code?'), 12000);
-      peer.on('error', (err) => {
-        if (err.type === 'peer-unavailable') fail('Kamer niet gevonden. Klopt de code?');
-        else if (!joined) fail('Verbinding mislukt: ' + err.type);
-      });
+    // One connection attempt. Reports 'notfound' (no such room right now), 'timeout' (the room
+    // exists but no connection comes up: usually the network) or 'server' (spelserver unreachable).
+    connect(onOpen, onFail) {
+      try { this.peer && this.peer.destroy(); } catch { /* ignore */ }
+      const peer = new Peer(PEER_OPTIONS);
+      this.peer = peer;
+      let settled = false;
+      let signalled = false;
+      const fail = (kind) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { peer.destroy(); } catch { /* ignore */ }
+        onFail(kind);
+      };
+      const timer = setTimeout(() => fail(signalled ? 'timeout' : 'server'), CONNECT_TIMEOUT_MS);
+      peer.on('error', (err) => fail(err.type === 'peer-unavailable' ? 'notfound' : 'server'));
       peer.on('open', () => {
-        const conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
+        signalled = true;
+        const conn = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'json' });
         this.conn = conn;
         conn.on('open', () => {
-          joined = true;
-          clearTimeout(timeout);
-          conn.send({ t: 'join', name, avatar, token: myToken() });
+          settled = true;
+          clearTimeout(timer);
           this.lastPong = Date.now();
-          setInterval(() => {
-            this.send({ t: 'ping' });
-            if (Date.now() - this.lastPong > 20000) this.lost();
-          }, 5000);
+          conn.send({ t: 'join', name: this.joinName, avatar: this.joinAvatar, token: myToken() });
+          onOpen();
         });
-        conn.on('data', (m) => this.receive(m));
-        conn.on('close', () => this.lost());
+        conn.on('data', (m) => { if (this.conn === conn) this.receive(m); });
+        conn.on('close', () => { if (this.conn === conn && settled) this.connectionLost(); });
       });
+    },
+
+    // First join: a room can be unreachable for a moment (host just switched apps, or refreshed),
+    // so try a few times before telling the player something is wrong.
+    join(code, name, avatar, onError, onStatus) {
+      this.code = code;
+      this.joinName = name;
+      this.joinAvatar = avatar;
+      this.onJoinError = onError;
+      this.gone = false;
+      const MESSAGES = {
+        notfound: 'Kamer niet gevonden. Klopt de code, en heeft de host het spel nog open? Op een telefoon moet de host de browser open houden.',
+        timeout: 'De kamer bestaat, maar de verbinding komt niet tot stand. Dit ligt meestal aan het netwerk (bijv. werk-wifi): probeer een ander netwerk of mobiele data.',
+        server: 'Geen verbinding met de spelserver. Controleer je internet en probeer het opnieuw.',
+      };
+      const attempt = (n) => {
+        onStatus(n === 1 ? 'Verbinden…' : `Kamer zoeken… (poging ${n} van 5)`);
+        this.connect(() => {
+          try { sessionStorage.setItem(JOINED_KEY, code); } catch { /* ignore */ }
+          this.startPing();
+        }, (kind) => {
+          // a timeout already took 15 seconds, so don't repeat that as often
+          if (n < (kind === 'timeout' ? 2 : 5)) setTimeout(() => attempt(n + 1), JOIN_RETRY_MS);
+          else onError(MESSAGES[kind]);
+        });
+      };
+      attempt(1);
+    },
+
+    startPing() {
+      if (this.pingTimer) return;
+      this.pingTimer = setInterval(() => this.checkHost(), 5000);
+    },
+    checkHost() {
+      if (this.gone || this.reconnecting) return;
+      this.send({ t: 'ping' });
+      if (Date.now() - this.lastPong <= 20000) return;
+      // quiet for a while (e.g. this tab was frozen): the connection may still be fine, so give
+      // the ping a moment to get an answer before building a new one
+      clearTimeout(this.graceTimer);
+      this.graceTimer = setTimeout(() => {
+        if (Date.now() - this.lastPong > 20000) this.connectionLost();
+      }, 3000);
+    },
+
+    // Lost the host mid-game: retry on our own. The host recognises our token, so the score stays.
+    connectionLost() {
+      if (this.isHost || this.gone || this.reconnecting) return;
+      this.reconnecting = true;
+      this.conn = null;
+      const until = Date.now() + RECONNECT_FOR_MS;
+      setBanner('🔄 Verbinding met de host herstellen…');
+      const retry = () => {
+        if (this.gone) return setBanner('');
+        if (Date.now() > until) {
+          this.reconnecting = false;
+          setBanner('');
+          return this.lost();
+        }
+        this.connect(() => {
+          this.reconnecting = false;
+          setBanner('');
+        }, () => setTimeout(retry, JOIN_RETRY_MS));
+      };
+      retry();
     },
 
     lost(text) {
       if (this.isHost || this.gone) return;
       this.gone = true;
-      showOverlay(text || 'De verbinding met de host is verbroken. Probeer opnieuw te verbinden — je punten blijven bewaard.', !text);
+      setBanner('');
+      showOverlay(text || 'De verbinding met de host is verbroken. Misschien heeft de host het spel gesloten.', !text);
     },
 
     receive(m) {
@@ -1354,7 +1506,8 @@
     },
 
     renderGameOver(v) {
-      const sorted = v.players.filter((p) => p.on).sort((a, b) => b.score - a.score);
+      const sorted = v.players.filter((p) => p.on && !p.late).sort((a, b) => b.score - a.score);
+      const meLate = (v.players.find((p) => p.id === v.me) || {}).late;
       const pod = $('#podium');
       pod.innerHTML = '';
       const places = [
@@ -1376,6 +1529,9 @@
       }
       $('#btn-again').style.display = this.isHost ? '' : 'none';
       $('#again-wait').style.display = this.isHost ? 'none' : '';
+      $('#again-wait').textContent = meLate
+        ? 'Dit spel is net afgelopen. Je doet mee zodra de host een nieuw spel start.'
+        : 'Wachten tot de host een nieuw spel start…';
 
       const awards = $('#awards');
       awards.innerHTML = '';
@@ -1466,6 +1622,11 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
   }
+  function setBanner(text) {
+    const b = $('#net-banner');
+    b.textContent = text;
+    b.classList.toggle('show', !!text);
+  }
   function showOverlay(text, canReconnect = false) {
     $('#overlay-text').textContent = text;
     $('#btn-reconnect').style.display = canReconnect ? '' : 'none';
@@ -1505,6 +1666,29 @@
     const link = shareLink(Client.code);
     try { await navigator.clipboard.writeText(link); toast('Link gekopieerd! Stuur hem naar je vrienden.'); }
     catch { const i = $('#share-link'); i.value = link; i.select(); toast('Kopieer de link hierboven'); }
+  }
+  // Browsers copy a tab's sessionStorage when it is duplicated or opened from another tab, so
+  // the copy would pretend to be the same player and push the original out of the game. Only a
+  // tab that really unloaded itself (a refresh) may keep its identity: pagehide leaves a mark.
+  const HOST_KEY = 'tekenraad-host';
+  const JOINED_KEY = 'tekenraad-joined';
+  const TOKEN_KEY = 'tekenraad-token';
+  const UNLOAD_KEY = 'tekenraad-unloaded';
+  function claimTabIdentity() {
+    let reloaded = false;
+    try {
+      reloaded = sessionStorage.getItem(UNLOAD_KEY) === '1';
+      sessionStorage.removeItem(UNLOAD_KEY);
+      if (!reloaded) [TOKEN_KEY, HOST_KEY, JOINED_KEY].forEach((k) => sessionStorage.removeItem(k));
+      window.addEventListener('pagehide', () => {
+        try { Host.save(); sessionStorage.setItem(UNLOAD_KEY, '1'); } catch { /* ignore */ }
+      });
+      // back in view from the browser's page cache: this tab never really left
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted) { try { sessionStorage.removeItem(UNLOAD_KEY); } catch { /* ignore */ } }
+      });
+    } catch { /* storage blocked: every load is simply a new player */ }
+    return reloaded;
   }
   // a per-tab token (survives reloads), so a player who reconnects gets their score back
   function myToken() {
@@ -1623,6 +1807,7 @@
 
   // ------------------------------------------------------------------ wiring
   function setup() {
+    const reloaded = claimTabIdentity();
     Board.init();
     buildToolbar();
     buildAvatarPicker();
@@ -1655,6 +1840,9 @@
       if (!name || noPeer()) return;
       initAudio();
       busy(true, 'Kamer aanmaken…');
+      openRoom(name);
+    });
+    const openRoom = (name, resume = null) => {
       Client.isHost = true;
       Host.open(name, avatar, (code) => {
         Client.code = code;
@@ -1662,10 +1850,13 @@
         $('#home-error').textContent = '';
         Host.broadcast();
       }, (err) => {
-        busy(false, 'Kon geen kamer aanmaken (' + err.type + '). Probeer opnieuw.');
+        try { sessionStorage.removeItem(HOST_KEY); } catch { /* ignore */ }
+        busy(false, resume
+          ? 'Kon de kamer niet terugkrijgen. Maak een nieuw spel.'
+          : 'Kon geen kamer aanmaken (' + err.type + '). Probeer opnieuw.');
         Client.isHost = false;
-      });
-    });
+      }, resume);
+    };
 
     const doJoin = () => {
       const name = getName();
@@ -1675,7 +1866,7 @@
       if (noPeer()) return;
       initAudio();
       busy(true, 'Verbinden…');
-      Client.join(code, name, avatar, (msg) => busy(false, msg));
+      Client.join(code, name, avatar, (msg) => busy(false, msg), (status) => busy(true, status));
     };
     $('#btn-join').addEventListener('click', doJoin);
     $('#code-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
@@ -1685,11 +1876,32 @@
     $('#btn-reconnect').addEventListener('click', () => {
       location.href = location.pathname + '?room=' + Client.code + '&rejoin=1';
     });
-    // after "Opnieuw verbinden": join straight away
-    if (room && params.get('rejoin') && nameInput.value) {
+    // A refresh shouldn't cost anyone their place: the host reopens the same room, a guest rejoins.
+    let savedRoom = null;
+    let joinedRoom = null;
+    try {
+      savedRoom = JSON.parse(sessionStorage.getItem(HOST_KEY) || 'null');
+      joinedRoom = sessionStorage.getItem(JOINED_KEY);
+    } catch { /* ignore */ }
+    if (reloaded && room && savedRoom && savedRoom.code === room && typeof Peer !== 'undefined') {
+      const me = (savedRoom.players || []).find((p) => p.token === 'host');
+      busy(true, 'Kamer opnieuw openen…');
+      openRoom((me && me.name) || nameInput.value, savedRoom);
+      const s = savedRoom.settings || {};
+      for (const k of ['rounds', 'time', 'choices', 'hints', 'mode', 'max']) if (s[k] !== undefined) $('#set-' + k).value = String(s[k]);
+    } else if (room && nameInput.value && (params.get('rejoin') || (reloaded && joinedRoom === room))) {
       history.replaceState(null, '', '?room=' + room);
       setTimeout(doJoin, 50);
     }
+
+    // back in view (phone app switch, sleeping tab): check the connection straight away
+    const wake = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Client.isHost) Host.reconnectNow();
+      else if (Client.conn) Client.checkHost();
+    };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
 
     $('#btn-copy').addEventListener('click', copyLink);
     $('#btn-copy2').addEventListener('click', copyLink);

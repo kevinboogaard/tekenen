@@ -31,7 +31,9 @@ Sneltoetsen: B pen, E gum, F emmer, L lijn, R rechthoek, O ellips, I pipet,
 ## Spelers beheren
 - Stem om een speler te verwijderen (meerderheid nodig); de host kan direct verwijderen.
 - De host kan een beurt overslaan.
-- Verbinding kwijt? "Opnieuw verbinden" en je punten blijven bewaard.
+- Verbinding kwijt? Het spel verbindt vanzelf opnieuw en je punten blijven bewaard.
+- Ververst de host de pagina, dan blijft de kamer bestaan en gaat iedereen terug naar de lobby.
+- Meedoen kan altijd, ook op het eindscherm: je speelt dan mee vanaf het volgende spel.
 
 ## Techniek
 Pure HTML/CSS/JS op GitHub Pages. Multiplayer gaat peer-to-peer via
