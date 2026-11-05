@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 8; // keep in sync with the ?v= in index.html
+  const VERSION = 9; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -574,8 +574,12 @@
       this.S.phase = 'gameOver';
       this.S.drawerId = null;
       this.S.awards = this.computeAwards();
-      const best = this.online().filter((p) => !p.late).sort((a, b) => b.score - a.score)[0]; // players who left or were kicked can't win
-      if (best) this.say(`${best.name} wint het spel met ${best.score} punten! 🏆`, 'good');
+      this.S.guessedIds = [];
+      const playing = this.online().filter((p) => !p.late); // players who left or were kicked can't win
+      const top = Math.max(...playing.map((p) => p.score));
+      const winners = playing.filter((p) => p.score === top);
+      if (winners.length === 1) this.say(`${winners[0].name} wint het spel met ${top} punten! 🏆`, 'good');
+      else if (winners.length) this.say(`${winners.map((p) => p.name).join(' & ')} winnen samen met ${top} punten! 🏆`, 'good');
       this.event('gameover');
       this.broadcast();
     },
@@ -1321,6 +1325,7 @@
         ? (isDrawer ? 'Jij tekent — chatten mag, verklappen niet!' : 'Typ je gok hier…')
         : 'Typ een bericht…';
 
+      updateGuessCount();
       this.renderChat(v);
       this.handleEvent(v);
     },
@@ -1342,7 +1347,7 @@
       const ol = $('#player-list');
       ol.innerHTML = '';
       const sorted = [...v.players].sort((a, b) => b.score - a.score);
-      const rankOf = new Map(sorted.map((p, i) => [p.id, i + 1]));
+      const rankOf = tiedRanks(sorted);
       const list = v.phase === 'lobby' ? v.players.filter((p) => p.on) : sorted;
       const online = v.players.filter((p) => p.on).length;
       $('#player-count').textContent = `${online}/${v.settings.max}`;
@@ -1502,6 +1507,7 @@
       $('#toolbar').classList.toggle('show', canDraw);
       $('#canvas').classList.toggle('can-draw', canDraw);
       $('#canvas').classList.toggle('fill-cursor', canDraw && (Board.tool === 'fill' || Board.tool === 'picker'));
+      paintCursor();
       $('#clock').classList.toggle('hidden', !(v.total && (v.phase === 'choosing' || v.phase === 'drawing')));
     },
 
@@ -1510,17 +1516,16 @@
       const meLate = (v.players.find((p) => p.id === v.me) || {}).late;
       const pod = $('#podium');
       pod.innerHTML = '';
-      const places = [
-        { i: 1, h: 110, c: '#cfd6de', m: '2' },
-        { i: 0, h: 150, c: '#ffd23f', m: '1' },
-        { i: 2, h: 80, c: '#e0a370', m: '3' },
-      ];
-      for (const pl of places) {
-        const p = sorted[pl.i];
-        if (!p) continue;
+      const ranks = tiedRanks(sorted);
+      const PLACES = { 1: { h: 150, c: '#ffd23f' }, 2: { h: 110, c: '#cfd6de' }, 3: { h: 80, c: '#e0a370' } };
+      // silver on the left, gold in the middle, bronze on the right; ties stand side by side
+      const atPlace = (n) => sorted.filter((p) => ranks.get(p.id) === n);
+      for (const p of [...atPlace(2), ...atPlace(1), ...atPlace(3)]) {
+        const place = ranks.get(p.id);
+        const pl = PLACES[place];
         const step = document.createElement('div');
         step.className = 'step';
-        step.innerHTML = `<span class="avatar huge"></span><div class="pn"></div><div class="ps">${p.score} pt</div><div class="block" style="height:${pl.h}px;background:${pl.c}">${pl.m}</div>`;
+        step.innerHTML = `<span class="avatar huge"></span><div class="pn"></div><div class="ps">${p.score} pt</div><div class="block" style="height:${pl.h}px;background:${pl.c}">${place}</div>`;
         const av = step.querySelector('.avatar');
         av.textContent = p.avatar.e;
         av.style.background = p.avatar.c;
@@ -1621,6 +1626,70 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+  // Letters typed so far against the length of the word, shown while guessing.
+  function updateGuessCount() {
+    const el = $('#guess-count');
+    const v = Client.v;
+    const me = v && v.players.find((p) => p.id === v.me);
+    const guessing = v && me && v.phase === 'drawing' && v.drawerId !== v.me && !me.guessed;
+    el.hidden = !guessing;
+    if (!guessing) return;
+    const typed = [...$('#chat-input').value].filter(isLetter).length;
+    // the "verborgen" mode keeps the length secret, so there it only counts what you typed
+    const total = v.hidden ? 0 : [...v.mask].filter((c) => c === '_' || isLetter(c)).length;
+    el.textContent = total ? `${typed}/${total}` : String(typed);
+    el.classList.toggle('match', !!total && typed === total);
+    el.classList.toggle('over', !!total && typed > total);
+  }
+  // Equal scores share a place: 335, 335, 100 gives places 1, 1, 3.
+  function tiedRanks(sorted) {
+    const ranks = new Map();
+    sorted.forEach((p, i) => ranks.set(p.id, i > 0 && p.score === sorted[i - 1].score ? ranks.get(sorted[i - 1].id) : i + 1));
+    return ranks;
+  }
+  // Cursors are drawn here so the point that really draws (the hotspot) is known on every
+  // system, and they show the chosen colour. Returned as a PNG, which all browsers accept.
+  const cursorCache = {};
+  function toolCursor(tool, color) {
+    const key = tool + color;
+    if (cursorCache[key]) return cursorCache[key];
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 32;
+    const x = cv.getContext('2d');
+    x.lineWidth = 1.6;
+    x.lineJoin = 'round';
+    x.strokeStyle = '#23262b';
+    const shape = (fill, draw) => { x.beginPath(); draw(); x.fillStyle = fill; x.fill(); x.stroke(); };
+    if (tool === 'pen') {
+      // a pencil with its point in the bottom-left corner
+      x.translate(2, 30);
+      x.rotate(-Math.PI / 4);
+      shape(color, () => x.rect(9, -4.5, 21, 9));
+      shape('#ff9db4', () => x.rect(30, -4.5, 6, 9));
+      shape('#f5d6a0', () => { x.moveTo(0, 0); x.lineTo(9, -4.5); x.lineTo(9, 4.5); x.closePath(); });
+      shape(color, () => { x.moveTo(0, 0); x.lineTo(3.5, -1.75); x.lineTo(3.5, 1.75); x.closePath(); });
+    } else {
+      // a tipped bucket, pouring a drop that lands on the bottom-left corner
+      x.save();
+      x.translate(19, 13);
+      x.rotate(-Math.PI / 4);
+      x.beginPath();
+      x.arc(0, -5, 8, Math.PI, 0);
+      x.stroke();
+      shape('#dfe3ea', () => { x.moveTo(-8, -5); x.lineTo(8, -5); x.lineTo(6, 11); x.lineTo(-6, 11); x.closePath(); });
+      shape(color, () => x.ellipse(0, -5, 8, 3, 0, 0, Math.PI * 2));
+      x.restore();
+      shape(color, () => { x.moveTo(5, 16); x.quadraticCurveTo(10, 23, 8.6, 26.5); x.arc(5, 25, 4, 0.4, Math.PI - 0.4); x.quadraticCurveTo(0, 23, 5, 16); });
+    }
+    cursorCache[key] = cv.toDataURL('image/png');
+    return cursorCache[key];
+  }
+  function paintCursor() {
+    const c = Board.canvas;
+    if (!c) return;
+    const hotspot = { pen: '2 30', fill: '5 29' }[Board.tool];
+    c.style.cursor = Board.canDraw() && hotspot ? `url("${toolCursor(Board.tool, Board.color)}") ${hotspot}, crosshair` : '';
   }
   function setBanner(text) {
     const b = $('#net-banner');
@@ -1769,6 +1838,7 @@
     $$('.tool.size').forEach((b) => b.classList.toggle('active', +b.dataset.size === Board.size));
     $$('.tool[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === Board.tool));
     $$('.tool.size .dot').forEach((d) => (d.style.background = Board.tool === 'eraser' ? '#bbb' : Board.color === '#ffffff' ? '#ddd' : Board.color));
+    paintCursor();
   }
 
   // ------------------------------------------------------------------ avatar picker
@@ -1917,15 +1987,26 @@
     });
 
     // lobby
-    const saveWords = () => {
+    // Words go to the host while typing: the host can press start at any moment.
+    let wordsTimer;
+    const sendWords = () => {
+      clearTimeout(wordsTimer);
       const list = parseWords($('#words-input').value);
       Client.send({ t: 'words', list });
+      return list;
+    };
+    const saveWords = () => {
+      const list = sendWords();
       Client.wordsTouched = false;
       $('#words-input').value = list.join(', ');
       toast(list.length ? `${list.length} woord${list.length === 1 ? '' : 'en'} opgeslagen` : 'Woorden gewist');
     };
     $('#btn-words').addEventListener('click', saveWords);
-    $('#words-input').addEventListener('input', () => (Client.wordsTouched = true));
+    $('#words-input').addEventListener('input', () => {
+      Client.wordsTouched = true;
+      clearTimeout(wordsTimer);
+      wordsTimer = setTimeout(sendWords, 400);
+    });
     $('#words-input').addEventListener('blur', () => { if (Client.wordsTouched) saveWords(); });
 
     const settingIds = ['rounds', 'time', 'choices', 'hints', 'mode', 'max'];
@@ -1979,7 +2060,9 @@
       if (!i.value.trim()) return;
       Client.send({ t: 'chat', text: i.value });
       i.value = '';
+      updateGuessCount();
     });
+    $('#chat-input').addEventListener('input', updateGuessCount);
 
     // keyboard: shortcuts for the drawer; typing anywhere focuses the chat for guessers
     const TOOL_KEYS = { b: 'pen', p: 'pen', e: 'eraser', f: 'fill', l: 'line', r: 'rect', o: 'ellipse', i: 'picker' };

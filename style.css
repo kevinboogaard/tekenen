@@ -234,6 +234,13 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .gallery a { text-decoration: none; font-size: 1.1rem; }
 .overlay-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
+/* letters typed while guessing */
+.guess-count { flex: none; align-self: center; min-width: 44px; padding: 2px 6px; border: 2px solid var(--line); border-radius: 8px; font-weight: 600; font-size: .9rem; text-align: center; font-variant-numeric: tabular-nums; }
+.guess-count[hidden] { display: none; }
+.guess-count.match { background: var(--good); color: #fff; }
+.guess-count.over { background: var(--bad); color: #fff; }
+.podium { flex-wrap: wrap; } /* many tied players wrap instead of running off the screen */
+
 /* connection status */
 .net-banner { display: none; position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 25; width: max-content; max-width: calc(100% - 32px); padding: 8px 14px; border: 2.5px solid var(--line); border-radius: 12px; background: var(--turn); color: #23262b; font-weight: 500; text-align: center; box-shadow: var(--shadow); }
 .net-banner.show { display: block; }
