@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 10; // keep in sync with the ?v= in index.html
+  const VERSION = 11; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -333,19 +333,14 @@
 
     // Only the players' own words are used. Only when nobody entered any word
     // does the game fall back to the built-in list.
-    pickWords(drawerId) {
+    pickWords() {
       const n = this.S.settings.choices;
-      const pot = this.customPot();
-      const source = pot.length ? pot : (window.BUILTIN_WORDS || []).map((w) => ({ w, by: null }));
-      const fresh = (x) => !this.used.has(compact(x.w));
-      const words = (list) => shuffle(list).map((x) => x.w);
-      const out = [];
-      const add = (list) => { for (const w of list) { if (out.length >= n) break; if (!out.some((o) => compact(o) === compact(w))) out.push(w); } };
-      add(words(source.filter((x) => fresh(x) && x.by !== drawerId))); // unused words someone else came up with
-      add(words(source.filter((x) => fresh(x) && x.by === drawerId))); // then your own unused words
-      add(words(source.filter((x) => x.by !== drawerId))); // all used up: allow repeats
-      add(words(source));
-      return out;
+      const pot = this.customPot().map((x) => x.w);
+      const source = pot.length ? pot : window.BUILTIN_WORDS || [];
+      const unused = shuffle(source.filter((w) => !this.used.has(compact(w))));
+      // everyone draws from the same pot, including their own words; repeats only once it runs out
+      const repeats = shuffle(source.filter((w) => this.used.has(compact(w))));
+      return [...unused, ...repeats].slice(0, n);
     },
 
     // ---- flow
@@ -392,7 +387,7 @@
     beginChoose(id) {
       const S = this.S;
       S.turnNo++;
-      Object.assign(S, { phase: 'choosing', drawerId: id, choices: this.pickWords(id), word: '', revealed: [], hintsGiven: 0, guessedIds: [], rates: {}, result: null });
+      Object.assign(S, { phase: 'choosing', drawerId: id, choices: this.pickWords(), word: '', revealed: [], hintsGiven: 0, guessedIds: [], rates: {}, result: null });
       this.log = [];
       this.startScores = Object.fromEntries(S.players.map((p) => [p.id, p.score]));
       this.event('choose', { to: id });

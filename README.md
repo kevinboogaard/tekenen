@@ -8,8 +8,8 @@ Speel het op **https://kevinboogaard.github.io/tekenen/**
 - In de lobby voegt iedereen tot 500 eigen woorden toe aan de woordenpot.
   Alleen die woorden worden getekend. Is de pot leeg, dan gebruikt het spel
   ~250 ingebouwde Nederlandse woorden.
-- Om de beurt kies je een woord en teken je het. Je krijgt bij voorkeur
-  woorden die iemand anders heeft bedacht.
+- Om de beurt kies je een woord en teken je het. Alle woorden uit de pot komen
+  door elkaar voorbij, dus je kunt ook je eigen woorden krijgen.
 - De rest raadt via de chat: hoe sneller, hoe meer punten (100–300).
   De tekenaar krijgt 50 punten per goede rader. "Bijna goed!" bij één letter verschil.
 - Letters worden als hint onthuld naarmate de tijd verstrijkt.
