@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Bump ?v= on every release so browsers never run a cached older version -->
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <!-- ========== HOME ========== -->
@@ -42,7 +42,7 @@
       </div>
 
       <p id="home-error" class="error" role="alert"></p>
-      <p class="version muted small">versie 6 · tot 500 woorden per speler</p>
+      <p class="version muted small">versie 7 · tot 500 woorden per speler</p>
     </div>
     <details class="how">
       <summary>Hoe werkt het?</summary>
@@ -182,6 +182,7 @@
               </div>
             </div>
           </div>
+          <div id="reactions" class="reactions" aria-label="Reageer op de tekening"></div>
           <div id="toolbar" class="toolbar">
             <div class="color-block">
               <div id="colors" class="colors"></div>
@@ -209,9 +210,13 @@
         <div id="view-gameover" class="view">
           <h2>🏆 Einde spel!</h2>
           <div id="podium" class="podium"></div>
+          <div id="awards" class="awards"></div>
           <button id="btn-again" class="btn primary big">Opnieuw spelen</button>
           <p id="again-wait" class="muted">Wachten tot de host een nieuw spel start…</p>
-          <h2 class="gallery-title">🖼️ Galerij</h2>
+          <div class="gallery-head">
+            <h2>🖼️ Galerij</h2>
+            <button id="btn-replay-all" class="btn">▶️ Alles terugkijken</button>
+          </div>
           <div id="gallery" class="gallery"></div>
         </div>
       </div>
@@ -227,6 +232,27 @@
     </main>
   </section>
 
+  <!-- Replay of a finished drawing -->
+  <div id="replay" class="overlay">
+    <div class="replay-card" role="dialog" aria-modal="true" aria-labelledby="replay-word">
+      <div class="replay-head">
+        <div>
+          <b id="replay-word"></b>
+          <span id="replay-by" class="muted small"></span>
+        </div>
+        <button id="replay-close" class="chip icon" title="Sluiten (Esc)">✕</button>
+      </div>
+      <canvas id="replay-canvas" width="800" height="600"></canvas>
+      <div class="replay-progress"><div id="replay-bar"></div></div>
+      <div class="replay-controls">
+        <button id="replay-restart" class="btn" title="Opnieuw afspelen">⏮️</button>
+        <button id="replay-pause" class="btn" title="Pauze">⏸️</button>
+        <button id="replay-speed" class="btn" title="Afspeelsnelheid">1×</button>
+        <button id="replay-next" class="btn" title="Volgende tekening">⏭️</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
   <div id="overlay" class="overlay">
     <div class="overlay-card">
@@ -239,7 +265,7 @@
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="words.js?v=6"></script>
-  <script src="game.js?v=6"></script>
+  <script src="words.js?v=7"></script>
+  <script src="game.js?v=7"></script>
 </body>
 </html>

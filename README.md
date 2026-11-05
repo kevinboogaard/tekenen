@@ -14,7 +14,9 @@ Speel het op **https://kevinboogaard.github.io/tekenen/**
   De tekenaar krijgt 50 punten per goede rader. "Bijna goed!" bij één letter verschil.
 - Letters worden als hint onthuld naarmate de tijd verstrijkt.
 - Wie het geraden heeft, chat alleen nog met de tekenaar en andere goede raders.
-- Geef een tekening 👍 of 👎. Aan het eind: podium + galerij met alle tekeningen (downloadbaar).
+- Geef een tekening 👍 of 👎 en laat live emoji's over de tekening zweven.
+- Aan het eind: podium, grappige prijzen (zoals Snelste rader en Onbegrepen kunstenaar)
+  en een galerij waarin je elke tekening streek voor streek terugkijkt of downloadt.
 
 ## Instellingen (host)
 Rondes (1–10) · tekentijd (30–180 s) · woordopties per beurt (1–10) · aantal hints (0–5) ·

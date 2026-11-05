@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 6; // keep in sync with the ?v= in index.html
+  const VERSION = 7; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   const CHOOSE_SECONDS = 15;
   const TURN_END_MS = 6000;
@@ -17,6 +17,8 @@
     '#4fc3f7', '#1e88e5', '#283593', '#8e24aa', '#f06292', '#ffcdd2', '#795548', '#d7a86e', '#ffe0b2', '#26a69a'];
   const SIZES = [4, 10, 20, 36];
   const SHAPES = ['line', 'rect', 'ellipse'];
+  const REACTIONS = ['😂', '🔥', '🤔', '💀', '😍', '👏', '🤯', '🙈'];
+  const newStats = () => ({ fastest: 0, guesses: 0, wrong: 0, close: 0, likes: 0, dislikes: 0, reactions: 0, allGuessed: 0, unguessed: 0 });
   const MAX_WORDS_PER_PLAYER = 500;
   const DEFAULT_SETTINGS = { rounds: 2, time: 80, choices: 3, hints: 3, mode: 'normal', max: 12 };
 
@@ -219,7 +221,7 @@
       const base = name;
       let n = 2;
       while (this.S.players.some((p) => p.on && p.name.toLowerCase() === name.toLowerCase())) name = `${base} ${n++}`;
-      this.S.players.push({ id, token: String(token || randId()), name, score: 0, on: true, avatar: cleanAvatar(avatar), words: [] });
+      this.S.players.push({ id, token: String(token || randId()), name, score: 0, on: true, avatar: cleanAvatar(avatar), words: [], stats: newStats() });
       this.lastSeen.set(id, Date.now());
       if (id !== 'host') {
         this.say(`${name} doet mee`);
@@ -329,7 +331,8 @@
       const S = this.S;
       if (S.phase !== 'lobby' || this.online().length < 2) return;
       S.players = S.players.filter((p) => p.on);
-      S.players.forEach((p) => (p.score = 0));
+      S.players.forEach((p) => { p.score = 0; p.stats = newStats(); });
+      S.awards = [];
       this.used.clear();
       S.kickVotes = {};
       S.round = 1;
@@ -342,6 +345,14 @@
     nextDrawer() {
       const S = this.S;
       this.clearDeadline();
+      // ratings can still change during the turn-end screen, so count them only now
+      const lastDrawer = this.p(S.drawerId);
+      if (lastDrawer) {
+        const r = this.rateCounts();
+        lastDrawer.stats.likes += r.up;
+        lastDrawer.stats.dislikes += r.down;
+      }
+      S.rates = {};
       if (this.online().length < 2) return this.backToLobby('Te weinig spelers over — terug naar de lobby.');
       for (let guard = 0; guard < 50; guard++) {
         while (S.queue.length) {
@@ -433,6 +444,9 @@
           const left = Math.max(0, (S.deadline - now) / S.timerTotal);
           const pts = Math.round((100 + 200 * left) / 5) * 5;
           p.score += pts;
+          const ms = S.timerTotal - (S.deadline - now);
+          p.stats.guesses++;
+          if (!p.stats.fastest || ms < p.stats.fastest) p.stats.fastest = Math.max(1, ms);
           const drawer = this.p(S.drawerId);
           if (drawer) drawer.score += 50;
           S.guessedIds.push(id);
@@ -440,8 +454,12 @@
           this.event('guessed', { by: id });
           if (this.allGuessed()) return this.endTurn('all');
           return this.broadcast();
-        } else if (target.length >= 4 && levenshtein(said, target) === 1) {
-          this.toast(id, `"${text}" is bijna goed!`);
+        } else if (said) {
+          p.stats.wrong++;
+          if (target.length >= 4 && levenshtein(said, target) === 1) {
+            p.stats.close++;
+            this.toast(id, `"${text}" is bijna goed!`);
+          }
         }
       }
       this.say(text, 'chat', p.name);
@@ -460,6 +478,40 @@
       this.event('rate', { v });
       this.broadcast();
     },
+    // floating emoji: sent straight to everyone, without a full state update
+    react(id, e) {
+      const S = this.S;
+      const p = this.p(id);
+      if ((S.phase !== 'drawing' && S.phase !== 'turnEnd') || !p || !REACTIONS.includes(e)) return;
+      const now = Date.now();
+      if (p.lastReact && now - p.lastReact < 250) return;
+      p.lastReact = now;
+      const drawer = this.p(S.drawerId);
+      if (drawer && id !== S.drawerId) drawer.stats.reactions++;
+      for (const o of this.online()) this.send(o.id, { t: 'react', e, from: p.name });
+    },
+
+    computeAwards() {
+      const players = this.online();
+      const out = [];
+      const award = (icon, title, value, why, lowest = false) => {
+        const scored = players.map((p) => ({ p, v: value(p.stats) })).filter((x) => x.v > 0);
+        if (!scored.length) return;
+        const top = (lowest ? Math.min : Math.max)(...scored.map((x) => x.v));
+        out.push({ icon, title, who: scored.filter((x) => x.v === top).map((x) => x.p.name).join(' & '), why: why(top) });
+      };
+      award('⚡', 'Snelste rader', (s) => s.fastest, (v) => `geraden in ${(v / 1000).toFixed(1).replace('.', ',')} sec`, true);
+      award('🎯', 'Scherpschutter', (s) => s.guesses, (v) => `${v}× goed geraden`);
+      award('🎨', 'Picasso', (s) => s.likes, (v) => `${v}× 👍 gekregen`);
+      award('🔥', 'Publiekslieveling', (s) => s.reactions, (v) => `${v} reactie${v === 1 ? '' : 's'} op tekeningen`);
+      award('🖌️', 'Duidelijke taal', (s) => s.allGuessed, (v) => `${v}× raadde iedereen het`);
+      award('🤷', 'Onbegrepen kunstenaar', (s) => s.unguessed, (v) => `${v}× raadde niemand het`);
+      award('🙈', 'Moderne kunst', (s) => s.dislikes, (v) => `${v}× 👎 gekregen`);
+      award('🤏', 'Net niet', (s) => s.close, (v) => `${v}× bijna goed`);
+      award('🎲', 'Grootste gokker', (s) => s.wrong, (v) => `${v} foute gok${v === 1 ? '' : 'ken'}`);
+      return out;
+    },
+
     rateCounts() {
       const vals = Object.values(this.S.rates);
       return { up: vals.filter((v) => v > 0).length, down: vals.filter((v) => v < 0).length };
@@ -469,6 +521,9 @@
       const S = this.S;
       this.clearDeadline();
       const drawer = this.name(S.drawerId);
+      const dp = this.p(S.drawerId);
+      if (dp && reason === 'all') dp.stats.allGuessed++;
+      if (dp && reason === 'time' && S.word && !S.guessedIds.length) dp.stats.unguessed++;
       const titles = {
         all: 'Iedereen heeft het geraden! 🎉',
         time: S.guessedIds.length ? '⏰ De tijd is om!' : '⏰ Niemand heeft het geraden…',
@@ -498,6 +553,7 @@
       this.clearDeadline();
       this.S.phase = 'gameOver';
       this.S.drawerId = null;
+      this.S.awards = this.computeAwards();
       const best = this.online().sort((a, b) => b.score - a.score)[0]; // players who left or were kicked can't win
       if (best) this.say(`${best.name} wint het spel met ${best.score} punten! 🏆`, 'good');
       this.event('gameover');
@@ -510,7 +566,7 @@
       const S = this.S;
       S.players = S.players.filter((p) => p.on);
       S.players.forEach((p) => (p.score = 0));
-      Object.assign(S, { phase: 'lobby', round: 0, queue: [], drawerId: null, choices: [], word: '', revealed: [], guessedIds: [], rates: {}, result: null });
+      Object.assign(S, { phase: 'lobby', awards: [], round: 0, queue: [], drawerId: null, choices: [], word: '', revealed: [], guessedIds: [], rates: {}, result: null });
       this.log = [];
       if (msg) this.say(msg);
       this.broadcast();
@@ -571,6 +627,7 @@
           break;
         case 'chat': this.chat(id, m.text); break;
         case 'rate': this.rate(id, m.v); break;
+        case 'react': this.react(id, m.e); break;
         case 'kick': this.voteKick(id, m.target); break;
         case 'skip': this.skip(id); break;
         case 'start': if (id === 'host') this.startGame(); break;
@@ -609,6 +666,7 @@
         chat: S.chat.filter((m) => !m.aud || m.aud.includes(pid)).slice(-60).map(({ aud, ...m }) => m),
         ev: S.ev,
         result: S.result,
+        awards: S.phase === 'gameOver' ? S.awards || [] : [],
         rates: this.rateCounts(),
         myRate: S.rates[pid] || 0,
         myVotes: Object.keys(S.kickVotes).filter((t) => S.kickVotes[t].includes(pid)),
@@ -702,32 +760,8 @@
       this.clearCanvas();
       for (const item of this.log) this.paint(item);
     },
-    paint(item) {
-      if (item.k === 'stroke') this.strokePts(item.c, item.s, item.p, 0);
-      else if (item.k === 'fill') floodFill(this.ctx, item.x, item.y, item.c);
-      else if (item.k === 'shape') drawShape(this.ctx, item);
-    },
-    strokePts(c, s, p, from) {
-      const ctx = this.ctx;
-      ctx.strokeStyle = c;
-      ctx.fillStyle = c;
-      ctx.lineWidth = s;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      if (from === 0) {
-        // a stroke starts with a dot, so a single tap is visible
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], s / 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      if (p.length <= 2) return;
-      // continue from the last already-drawn point
-      const start = from === 0 ? 0 : from - 2;
-      ctx.beginPath();
-      ctx.moveTo(p[start], p[start + 1]);
-      for (let i = start + 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
-      ctx.stroke();
-    },
+    paint(item) { paintItem(this.ctx, item); },
+    strokePts(c, s, p, from) { drawStroke(this.ctx, c, s, p, from); },
 
     // apply an operation (from network or local) and render it incrementally
     apply(op) {
@@ -832,6 +866,123 @@
       const p = this.pending;
       this.pending = [];
       for (let i = 0; i < p.length; i += 400) this.local({ k: 'pts', id: this.drawing, p: p.slice(i, i + 400) });
+    },
+  };
+
+  function paintItem(ctx, item) {
+    if (item.k === 'stroke') drawStroke(ctx, item.c, item.s, item.p, 0);
+    else if (item.k === 'fill') floodFill(ctx, item.x, item.y, item.c);
+    else if (item.k === 'shape') drawShape(ctx, item);
+  }
+  // Draws stroke points from coordinate index `from` onward (0 = the whole stroke).
+  function drawStroke(ctx, c, s, p, from) {
+    ctx.strokeStyle = c;
+    ctx.fillStyle = c;
+    ctx.lineWidth = s;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (from === 0) {
+      // a stroke starts with a dot, so a single tap is visible
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], s / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (p.length <= 2) return;
+    // continue from the last already-drawn point
+    const start = from === 0 ? 0 : from - 2;
+    ctx.beginPath();
+    ctx.moveTo(p[start], p[start + 1]);
+    for (let i = start + 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+    ctx.stroke();
+  }
+
+  // ================================================================== REPLAY
+  // Plays a finished drawing back stroke by stroke from its operation log.
+  const Replay = {
+    ctx: null,
+    list: [],
+    index: 0,
+    item: 0,
+    drawn: 0, // points of the current stroke already drawn
+    spent: 0,
+    total: 0,
+    elapsed: 0,
+    duration: 0,
+    last: 0,
+    speed: 1,
+    paused: false,
+    raf: 0,
+    nextTimer: 0,
+
+    weight(it) { return it.k === 'stroke' ? Math.max(1, it.p.length / 2) : 12; },
+    open(list) {
+      this.list = list.filter((g) => g.log && g.log.length);
+      if (!this.list.length) return;
+      this.ctx = this.ctx || $('#replay-canvas').getContext('2d', { willReadFrequently: true });
+      $('#replay').classList.add('show');
+      this.play(0);
+    },
+    play(i) {
+      this.stop();
+      this.index = i;
+      const g = this.list[i];
+      $('#replay-word').textContent = g.word;
+      $('#replay-by').textContent = `door ${g.drawer}${this.list.length > 1 ? ` · ${i + 1} van ${this.list.length}` : ''}`;
+      $('#replay-next').hidden = i >= this.list.length - 1;
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillRect(0, 0, W, H);
+      this.item = this.drawn = this.spent = this.elapsed = 0;
+      this.total = g.log.reduce((n, it) => n + this.weight(it), 0);
+      this.duration = Math.min(12000, Math.max(2500, this.total * 14)); // always watchable, never endless
+      this.paused = false;
+      $('#replay-pause').textContent = '⏸️';
+      $('#replay-bar').style.width = '0';
+      this.last = performance.now();
+      this.raf = requestAnimationFrame((t) => this.frame(t));
+    },
+    frame(now) {
+      const g = this.list[this.index];
+      if (!this.paused) this.elapsed += (now - this.last) * this.speed;
+      this.last = now;
+      const target = (this.elapsed / this.duration) * this.total;
+      while (this.item < g.log.length && this.spent < target) {
+        const it = g.log[this.item];
+        if (it.k === 'stroke') {
+          const n = Math.max(1, it.p.length / 2);
+          const upto = Math.min(n, this.drawn + Math.ceil(target - this.spent));
+          drawStroke(this.ctx, it.c, it.s, it.p.slice(0, upto * 2), this.drawn * 2);
+          this.spent += upto - this.drawn;
+          this.drawn = upto;
+          if (this.drawn >= n) { this.item++; this.drawn = 0; }
+        } else {
+          paintItem(this.ctx, it);
+          this.spent += 12;
+          this.item++;
+        }
+      }
+      $('#replay-bar').style.width = Math.min(100, (this.spent / this.total) * 100) + '%';
+      if (this.item < g.log.length) { this.raf = requestAnimationFrame((t) => this.frame(t)); return; }
+      this.raf = 0;
+      $('#replay-pause').textContent = '▶️';
+      if (this.index < this.list.length - 1) this.nextTimer = setTimeout(() => this.play(this.index + 1), 1500);
+    },
+    togglePause() {
+      if (!this.raf) return this.play(this.index); // finished: play it again
+      this.paused = !this.paused;
+      $('#replay-pause').textContent = this.paused ? '▶️' : '⏸️';
+    },
+    cycleSpeed() {
+      this.speed = this.speed === 1 ? 2 : this.speed === 2 ? 4 : 1;
+      $('#replay-speed').textContent = this.speed + '×';
+    },
+    stop() {
+      cancelAnimationFrame(this.raf);
+      clearTimeout(this.nextTimer);
+      this.raf = 0;
+    },
+    close() {
+      this.stop();
+      $('#replay').classList.remove('show');
     },
   };
 
@@ -951,6 +1102,7 @@
       this.lastPong = Date.now();
       switch (m.t) {
         case 'toast': return toast(m.text);
+        case 'react': return spawnReaction(m.e, m.from);
         case 'state': showScreen('game'); return this.render(m);
         case 'full':
           this.gone = true;
@@ -991,6 +1143,7 @@
       }
 
       if (v.turnNo !== Board.turn) Board.reset(v.turnNo);
+      if (v.phase !== 'gameOver') Replay.close();
 
       $('#room-code').textContent = this.code;
       $('#round-info').textContent =
@@ -1027,6 +1180,7 @@
           word: v.result.word,
           drawer: v.result.drawer,
           img: Board.canvas.toDataURL('image/jpeg', 0.75),
+          log: clone(Board.log),
           rates: v.rates,
         });
       } catch { /* ignore */ }
@@ -1126,6 +1280,8 @@
         mask.textContent = v.word || '';
       }
 
+      $('#reactions').classList.toggle('show', v.phase === 'drawing' || v.phase === 'turnEnd');
+
       // actions: rate, save, skip
       const canRate = !isDrawer && (v.phase === 'drawing' || v.phase === 'turnEnd');
       $('#btn-like').hidden = !canRate && !isDrawer;
@@ -1221,13 +1377,30 @@
       $('#btn-again').style.display = this.isHost ? '' : 'none';
       $('#again-wait').style.display = this.isHost ? 'none' : '';
 
+      const awards = $('#awards');
+      awards.innerHTML = '';
+      for (const a of v.awards) {
+        const el = document.createElement('div');
+        el.className = 'award';
+        el.innerHTML = '<span class="award-icon"></span><div class="award-text"><div class="award-title"></div><div class="award-who"></div><div class="award-why"></div></div>';
+        el.querySelector('.award-icon').textContent = a.icon;
+        el.querySelector('.award-title').textContent = a.title;
+        el.querySelector('.award-who').textContent = a.who;
+        el.querySelector('.award-why').textContent = a.why;
+        awards.appendChild(el);
+      }
+
       const gal = $('#gallery');
       gal.innerHTML = '';
-      $('.gallery-title').style.display = this.gallery.length ? '' : 'none';
+      $('.gallery-head').style.display = this.gallery.length ? '' : 'none';
+      $('#btn-replay-all').style.display = this.gallery.filter((g) => g.log.length).length > 1 ? '' : 'none';
       for (const g of this.gallery) {
         const card = document.createElement('div');
         card.className = 'card';
-        card.innerHTML = `<img alt=""><div class="meta"><div><b></b><span class="muted"></span></div><a title="Downloaden">💾</a></div>`;
+        card.innerHTML = `<button class="thumb" title="Terugkijken"><img alt=""><span class="play-badge">▶</span></button><div class="meta"><div><b></b><span class="muted"></span></div><a title="Downloaden">💾</a></div>`;
+        const thumb = card.querySelector('.thumb');
+        if (g.log.length) thumb.addEventListener('click', () => Replay.open([g]));
+        else { thumb.disabled = true; thumb.title = 'Niets getekend'; thumb.querySelector('.play-badge').remove(); }
         card.querySelector('img').src = g.img;
         card.querySelector('img').alt = `Tekening van ${g.word}`;
         card.querySelector('b').textContent = g.word;
@@ -1297,6 +1470,21 @@
     $('#overlay-text').textContent = text;
     $('#btn-reconnect').style.display = canReconnect ? '' : 'none';
     $('#overlay').classList.add('show');
+  }
+  function spawnReaction(e, from) {
+    const wrap = $('.canvas-wrap');
+    if (!wrap || wrap.querySelectorAll('.float-react').length >= 40) return; // keep the drawing visible
+    const el = document.createElement('div');
+    el.className = 'float-react';
+    el.textContent = e;
+    el.style.left = 6 + Math.random() * 78 + '%';
+    el.style.setProperty('--sway', (Math.random() > 0.5 ? 1 : -1) * (8 + Math.random() * 22) + 'px');
+    const who = document.createElement('span');
+    who.textContent = from;
+    el.appendChild(who);
+    wrap.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+    sfx.like();
   }
   function confetti(n = 80) {
     const colors = ['#5b6cff', '#ffd23f', '#2bb673', '#ff7b9c', '#d6a2e8'];
@@ -1541,6 +1729,25 @@
       Client.send({ t: 'start' });
     });
     $('#btn-again').addEventListener('click', () => Client.send({ t: 'again' }));
+
+    // live reactions
+    for (const e of REACTIONS) {
+      const b = document.createElement('button');
+      b.textContent = e;
+      b.title = 'Reageer met ' + e;
+      b.addEventListener('click', () => Client.send({ t: 'react', e }));
+      $('#reactions').appendChild(b);
+    }
+
+    // replay
+    $('#btn-replay-all').addEventListener('click', () => Replay.open(Client.gallery));
+    $('#replay-close').addEventListener('click', () => Replay.close());
+    $('#replay-restart').addEventListener('click', () => Replay.play(Replay.index));
+    $('#replay-pause').addEventListener('click', () => Replay.togglePause());
+    $('#replay-speed').addEventListener('click', () => Replay.cycleSpeed());
+    $('#replay-next').addEventListener('click', () => Replay.play(Replay.index + 1));
+    $('#replay').addEventListener('click', (e) => { if (e.target.id === 'replay') Replay.close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') Replay.close(); });
 
     // board actions
     $('#btn-like').addEventListener('click', () => Client.send({ t: 'rate', v: 1 }));
