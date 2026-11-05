@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 11; // keep in sync with the ?v= in index.html
+  const VERSION = 12; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -1673,6 +1673,12 @@
       shape('#ff9db4', () => x.rect(30, -4.5, 6, 9));
       shape('#f5d6a0', () => { x.moveTo(0, 0); x.lineTo(9, -4.5); x.lineTo(9, 4.5); x.closePath(); });
       shape(color, () => { x.moveTo(0, 0); x.lineTo(3.5, -1.75); x.lineTo(3.5, 1.75); x.closePath(); });
+    } else if (tool === 'eraser') {
+      // an eraser with its rubbing end in the bottom-left corner
+      x.translate(5, 27);
+      x.rotate(-Math.PI / 4);
+      shape('#6ec6ff', () => x.rect(9, -7, 17, 14));
+      shape('#ff9db4', () => x.rect(0, -7, 9, 14));
     } else {
       // a tipped bucket, pouring a drop that lands on the bottom-left corner
       x.save();
@@ -1692,7 +1698,7 @@
   function paintCursor() {
     const c = Board.canvas;
     if (!c) return;
-    const hotspot = { pen: '2 30', fill: '5 29' }[Board.tool];
+    const hotspot = { pen: '2 30', fill: '5 29', eraser: '5 27' }[Board.tool];
     c.style.cursor = Board.canDraw() && hotspot ? `url("${toolCursor(Board.tool, Board.color)}") ${hotspot}, crosshair` : '';
   }
   function setBanner(text) {

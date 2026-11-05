@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Bump ?v= on every release so browsers never run a cached older version -->
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <!-- ========== HOME ========== -->
@@ -42,7 +42,7 @@
       </div>
 
       <p id="home-error" class="error" role="alert"></p>
-      <p class="version muted small">versie 11 · tot 500 woorden per speler</p>
+      <p class="version muted small">versie 12 · tot 500 woorden per speler</p>
     </div>
     <details class="how">
       <summary>Hoe werkt het?</summary>
@@ -191,7 +191,7 @@
             <div class="tool-group" id="sizes"></div>
             <div class="tool-group">
               <button class="tool" data-tool="pen" title="Pen (B)">✏️</button>
-              <button class="tool" data-tool="eraser" title="Gum (E)">🧽</button>
+              <button class="tool" data-tool="eraser" title="Gum (E)" aria-label="Gum"><svg viewBox="0 0 24 24"><g transform="rotate(-45 12 12)" stroke-width="1.8"><rect x="10" y="6.5" width="12" height="11" rx="1.5" fill="#6ec6ff"/><rect x="2" y="6.5" width="8.5" height="11" rx="1.5" fill="#ff9db4"/></g></svg></button>
               <button class="tool" data-tool="fill" title="Emmer (F)">🪣</button>
               <button class="tool" data-tool="line" title="Lijn (L)"><svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
               <button class="tool" data-tool="rect" title="Rechthoek (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
@@ -267,7 +267,7 @@
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="words.js?v=11"></script>
-  <script src="game.js?v=11"></script>
+  <script src="words.js?v=12"></script>
+  <script src="game.js?v=12"></script>
 </body>
 </html>
