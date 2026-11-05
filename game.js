@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 12; // keep in sync with the ?v= in index.html
+  const VERSION = 13; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {

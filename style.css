@@ -83,7 +83,7 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .brand { font-size: 1.5rem; font-weight: 700; transform: rotate(-2deg); }
 .round-info { flex: 1; text-align: center; font-weight: 500; }
 .top-actions { display: flex; gap: 8px; }
-.layout { display: grid; grid-template-columns: 210px minmax(0, 1fr) 280px; gap: 14px; max-width: 1280px; margin: 0 auto; padding: 0 16px 16px; }
+.layout { display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; gap: 14px; max-width: 1280px; margin: 0 auto; padding: 0 16px 16px; }
 .panel { background: var(--panel); border: 3px solid var(--line); border-radius: var(--radius); box-shadow: 5px 5px 0 var(--line); padding: 14px; min-width: 0; }
 .stage { display: flex; flex-direction: column; }
 .view { display: none; flex: 1; flex-direction: column; }
@@ -97,7 +97,8 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 #player-list li.off { opacity: .45; }
 #player-list .rank { font-weight: 700; min-width: 1.6em; color: var(--muted); }
 #player-list li.drawer .rank { color: inherit; }
-#player-list .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#player-list .pname { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.2; } /* long names wrap instead of being cut off */
+#player-list .rank:empty, #player-list .votes:empty { display: none; }
 #player-list .pscore { font-weight: 600; }
 #player-list .you { font-size: .75em; opacity: .7; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-weight: 700; font-size: .85rem; color: #23262b; flex: none; }
@@ -198,10 +199,17 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .av-colors button.active { outline: 3px solid var(--accent); outline-offset: 1px; }
 
 /* players: kick */
-#player-list .kick { background: none; border: none; cursor: pointer; font-size: .95rem; padding: 0 2px; opacity: 0; transition: opacity .15s; }
+/* hidden until needed, so it takes no room from the name; keyboard users can still tab to it */
+#player-list .kick { background: none; border: none; cursor: pointer; font-size: .95rem; padding: 0 2px; opacity: 0; position: absolute; right: 2px; }
+#player-list li { position: relative; }
+#player-list li:hover .pscore { visibility: hidden; }
 #player-list li:hover .kick, #player-list .kick:focus-visible { opacity: .85; }
 #player-list .votes { font-size: .75rem; color: var(--bad); font-weight: 600; }
-@media (hover: none) { #player-list .kick { opacity: .6; } }
+@media (hover: none) {
+  /* touch screens have no hover: keep the button visible, next to the score */
+  #player-list .kick { opacity: .6; position: static; }
+  #player-list li:hover .pscore { visibility: visible; }
+}
 
 /* settings grid */
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
