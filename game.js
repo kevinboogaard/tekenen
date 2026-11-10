@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 13; // keep in sync with the ?v= in index.html
+  const VERSION = 14; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -1120,6 +1120,36 @@
         }
         x++;
       }
+    }
+    // The soft edge of a line is a blend of the line colour and the OLD background, so it would
+    // stay behind as a thin rim. Re-blend those edge pixels with the new fill colour instead.
+    const dist = (i) => Math.abs(d[i] - tr) + Math.abs(d[i + 1] - tg) + Math.abs(d[i + 2] - tb);
+    const edits = [];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const pi = y * W + x;
+        if (seen[pi]) continue;
+        let touchesFill = false;
+        let far = 0; // the neighbour least like the old background: the pure line colour
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            const ni = ny * W + nx;
+            if (seen[ni]) touchesFill = true;
+            else far = Math.max(far, dist(ni * 4));
+          }
+        }
+        if (!touchesFill) continue;
+        const own = dist(pi * 4);
+        if (far <= own) continue; // already pure line colour
+        const share = 1 - own / far; // how much of this pixel was old background
+        edits.push(pi * 4, d[pi * 4] + (fr - tr) * share, d[pi * 4 + 1] + (fg - tg) * share, d[pi * 4 + 2] + (fb - tb) * share);
+      }
+    }
+    for (let k = 0; k < edits.length; k += 4) {
+      const i = edits[k];
+      d[i] = edits[k + 1]; d[i + 1] = edits[k + 2]; d[i + 2] = edits[k + 3]; // the pixel array clamps to 0–255
     }
     ctx.putImageData(img, 0, 0);
   }
