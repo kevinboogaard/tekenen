@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 14; // keep in sync with the ?v= in index.html
+  const VERSION = 15; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -2042,6 +2042,73 @@
       toast(list.length ? `${list.length} woord${list.length === 1 ? '' : 'en'} opgeslagen` : 'Woorden gewist');
     };
     $('#btn-words').addEventListener('click', saveWords);
+    $('#btn-words-clear').addEventListener('click', () => {
+      if (!$('#words-input').value.trim() || !confirm('Je hele woordenlijst leegmaken?')) return;
+      $('#words-input').value = '';
+      saveWords();
+    });
+
+    // ---- word generator: adds words from the built-in bank to the player's own list
+    const bank = window.WORD_BANK || [];
+    const genTheme = $('#gen-theme');
+    genTheme.add(new Option('Alles door elkaar', 'all'));
+    for (const t of bank) genTheme.add(new Option(t.name, t.id));
+    const LEVEL_WORDS = { easy: /makkelijk|simpel|eenvoudig|easy/, medium: /gemiddeld|normaal|medium/, hard: /moeilijk|lastig|pittig|hard/ };
+    // "20 moeilijke dieren" -> count 20, level hard, theme dieren. Returns false if nothing was understood.
+    const readAsk = () => {
+      const text = stripAccents($('#gen-ask').value).toLowerCase();
+      if (!text.trim()) return true;
+      let understood = false;
+      const num = text.match(/\d+/);
+      if (num) {
+        const n = String(clampInt(num[0], 1, 100, 20));
+        if (![...$('#gen-count').options].some((o) => o.value === n)) $('#gen-count').add(new Option(n, n));
+        $('#gen-count').value = n;
+        understood = true;
+      }
+      // the typed text decides everything it can: what it doesn't mention goes back to "alles"
+      $('#gen-level').value = 'all';
+      genTheme.value = 'all';
+      for (const [level, re] of Object.entries(LEVEL_WORDS)) if (re.test(text)) { $('#gen-level').value = level; understood = true; }
+      // a keyword must start a word ("les" is not in "alles"); the longest match wins ("vakantie" over "vak")
+      let theme = null;
+      let best = 0;
+      for (const t of bank) for (const k of [t.id, ...t.keys]) {
+        if (k.length > best && new RegExp('\\b' + k).test(text)) { theme = t; best = k.length; }
+      }
+      if (theme) { genTheme.value = theme.id; understood = true; }
+      else if (/alles|willekeurig|door elkaar|random/.test(text)) { genTheme.value = 'all'; understood = true; }
+      return understood;
+    };
+    $('#gen-ask').addEventListener('input', readAsk);
+    const generate = () => {
+      const msg = $('#gen-msg');
+      if (!readAsk()) {
+        msg.textContent = `Dat onderwerp ken ik niet. Kies er een uit de lijst: ${bank.map((t) => t.name).join(', ')}.`;
+        return;
+      }
+      const themes = genTheme.value === 'all' ? bank : bank.filter((t) => t.id === genTheme.value);
+      const levels = $('#gen-level').value === 'all' ? ['easy', 'medium', 'hard'] : [$('#gen-level').value];
+      const count = clampInt($('#gen-count').value, 1, 100, 20);
+      const current = parseWords($('#words-input').value);
+      const have = new Set(current.map(compact));
+      const pool = [];
+      for (const t of themes) for (const l of levels) for (const w of t[l]) {
+        const k = compact(w);
+        if (!have.has(k)) { have.add(k); pool.push(w); }
+      }
+      const room = MAX_WORDS_PER_PLAYER - current.length;
+      const picked = shuffle(pool).slice(0, Math.max(0, Math.min(count, room)));
+      if (!picked.length) {
+        msg.textContent = room <= 0 ? `Je lijst zit vol (${MAX_WORDS_PER_PLAYER} woorden).` : 'Alle woorden van deze keuze staan al in je lijst.';
+        return;
+      }
+      $('#words-input').value = current.concat(picked).join(', ');
+      saveWords();
+      msg.textContent = `✓ ${picked.length} woord${picked.length === 1 ? '' : 'en'} toegevoegd${picked.length < count ? ' — meer zijn er niet voor deze keuze' : ''}.`;
+    };
+    $('#btn-generate').addEventListener('click', generate);
+    $('#gen-ask').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); generate(); } });
     $('#words-input').addEventListener('input', () => {
       Client.wordsTouched = true;
       clearTimeout(wordsTimer);

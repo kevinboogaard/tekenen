@@ -249,6 +249,13 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .guess-count.over { background: var(--bad); color: #fff; }
 .podium { flex-wrap: wrap; } /* many tied players wrap instead of running off the screen */
 
+/* word generator */
+.generator { margin-top: 18px; padding: 12px; border: 2.5px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); display: grid; gap: 8px; }
+.generator h2, .generator p { margin: 0; }
+.gen-grid { display: grid; grid-template-columns: 1.3fr 1.3fr .8fr; gap: 8px; }
+.gen-grid label { display: grid; gap: 3px; font-weight: 500; font-size: .9rem; min-width: 0; }
+@media (max-width: 640px) { .gen-grid { grid-template-columns: 1fr; } }
+
 /* connection status */
 .net-banner { display: none; position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 25; width: max-content; max-width: calc(100% - 32px); padding: 8px 14px; border: 2.5px solid var(--line); border-radius: 12px; background: var(--turn); color: #23262b; font-weight: 500; text-align: center; box-shadow: var(--shadow); }
 .net-banner.show { display: block; }

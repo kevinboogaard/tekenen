@@ -8,6 +8,8 @@ Speel het op **https://kevinboogaard.github.io/tekenen/**
 - In de lobby voegt iedereen tot 500 eigen woorden toe aan de woordenpot.
   Alleen die woorden worden getekend. Is de pot leeg, dan gebruikt het spel
   ~250 ingebouwde Nederlandse woorden.
+- Geen inspiratie? De woordgenerator voegt woorden toe aan je lijst: kies een onderwerp
+  (15 thema's, ~885 woorden) en een moeilijkheid, of typ bijv. "20 moeilijke dieren".
 - Om de beurt kies je een woord en teken je het. Alle woorden uit de pot komen
   door elkaar voorbij, dus je kunt ook je eigen woorden krijgen.
 - De rest raadt via de chat: hoe sneller, hoe meer punten (100–300).

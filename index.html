@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Bump ?v= on every release so browsers never run a cached older version -->
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
   <!-- ========== HOME ========== -->
@@ -42,7 +42,7 @@
       </div>
 
       <p id="home-error" class="error" role="alert"></p>
-      <p class="version muted small">versie 14 · tot 500 woorden per speler</p>
+      <p class="version muted small">versie 15 · tot 500 woorden per speler</p>
     </div>
     <details class="how">
       <summary>Hoe werkt het?</summary>
@@ -84,9 +84,36 @@
               <textarea id="words-input" rows="8" maxlength="16000" placeholder="fietsenrek, oma op de scooter, pannenkoek, ..."></textarea>
               <div class="words-row">
                 <button id="btn-words" class="btn">Opslaan</button>
+                <button id="btn-words-clear" class="btn" title="Je woordenlijst leegmaken">Leegmaken</button>
                 <span id="words-saved" class="muted small"></span>
               </div>
               <p id="pot-info" class="pot"></p>
+
+              <div class="generator">
+                <h2>🎲 Woordgenerator</h2>
+                <p class="muted small">Geen inspiratie? Laat woorden toevoegen aan je lijst. Typ wat je zoekt, of kies hieronder.</p>
+                <input id="gen-ask" maxlength="60" autocomplete="off" placeholder="bijv. 20 moeilijke dieren">
+                <div class="gen-grid">
+                  <label>Onderwerp
+                    <select id="gen-theme"></select>
+                  </label>
+                  <label>Moeilijkheid
+                    <select id="gen-level">
+                      <option value="all">Alles door elkaar</option>
+                      <option value="easy">Makkelijk te tekenen</option>
+                      <option value="medium">Gemiddeld</option>
+                      <option value="hard">Moeilijk te tekenen</option>
+                    </select>
+                  </label>
+                  <label>Aantal
+                    <select id="gen-count">
+                      <option>5</option><option>10</option><option selected>20</option><option>30</option><option>50</option><option>100</option>
+                    </select>
+                  </label>
+                </div>
+                <button id="btn-generate" class="btn primary">Woorden toevoegen</button>
+                <p id="gen-msg" class="muted small" role="status"></p>
+              </div>
             </div>
             <div class="lobby-settings">
               <h2>Instellingen</h2>
@@ -267,7 +294,8 @@
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="words.js?v=14"></script>
-  <script src="game.js?v=14"></script>
+  <script src="words.js?v=15"></script>
+  <script src="wordbank.js?v=15"></script>
+  <script src="game.js?v=15"></script>
 </body>
 </html>
