@@ -249,6 +249,8 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--turn); outl
 .guess-count.over { background: var(--bad); color: #fff; }
 .podium { flex-wrap: wrap; } /* many tied players wrap instead of running off the screen */
 
+.tool:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
 /* word generator */
 .generator { margin-top: 18px; padding: 12px; border: 2.5px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); display: grid; gap: 8px; }
 .generator h2, .generator p { margin: 0; }

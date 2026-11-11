@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 15; // keep in sync with the ?v= in index.html
+  const VERSION = 16; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -140,6 +140,7 @@
       }
       case 'fill': log.push({ k: 'fill', id: op.id, x: op.x, y: op.y, c: op.c }); break;
       case 'shape': log.push({ k: 'shape', id: op.id, sh: op.sh, c: op.c, s: op.s, x1: op.x1, y1: op.y1, x2: op.x2, y2: op.y2 }); break;
+      case 'copy': log.push({ k: 'copy', id: op.id, sx: op.sx, sy: op.sy, w: op.w, h: op.h, dx: op.dx, dy: op.dy }); break;
       case 'item': log.push(clone(op.it)); break;
       case 'undo': log.pop(); break;
       case 'clear': log.length = 0; break;
@@ -152,6 +153,12 @@
     if (it.k === 'stroke') return isCol(it.c) && SIZES.includes(it.s) && Array.isArray(it.p) && it.p.length >= 2 && it.p.length <= 40000 && it.p.every(isNum);
     if (it.k === 'fill') return isCol(it.c) && isNum(it.x) && isNum(it.y);
     if (it.k === 'shape') return SHAPES.includes(it.sh) && isCol(it.c) && SIZES.includes(it.s) && [it.x1, it.y1, it.x2, it.y2].every(isNum);
+    if (it.k === 'copy') {
+      // a piece of the canvas (inside it) pasted somewhere else (may hang over the edge)
+      return [it.sx, it.sy, it.w, it.h, it.dx, it.dy].every(Number.isInteger)
+        && it.w >= 1 && it.h >= 1 && it.sx >= 0 && it.sy >= 0 && it.sx + it.w <= W && it.sy + it.h <= H
+        && Math.abs(it.dx) <= W && Math.abs(it.dy) <= H;
+    }
     return false;
   }
   function validOp(op) {
@@ -161,6 +168,7 @@
       case 'pts': return Array.isArray(op.p) && op.p.length <= 400 && op.p.every(isNum);
       case 'fill': return isCol(op.c) && isNum(op.x) && isNum(op.y);
       case 'shape': return validItem({ ...op, k: 'shape' });
+      case 'copy': return validItem({ ...op, k: 'copy' });
       case 'item': return validItem(op.it);
       case 'undo': case 'clear': return true;
     }
@@ -829,10 +837,14 @@
       this.redoStack = [];
       this.drawing = null;
       this.shapeStart = null;
+      this.selStart = null;
+      this.selection = null;
+      this.clip = null;
+      this.pasting = null;
       this.pending = [];
       this.tool = 'pen'; // every turn starts with the pen, not a leftover fill bucket
       paintToolbar();
-      this.clearPreview();
+      this.drawOverlay();
       this.clearCanvas();
     },
     clearCanvas() {
@@ -840,6 +852,62 @@
       this.ctx.fillRect(0, 0, W, H);
     },
     clearPreview() { this.pv.clearRect(0, 0, W, H); },
+
+    // ---- select, copy, paste
+    // Shows the selection frame, or the copied piece floating under the pointer while pasting.
+    drawOverlay() {
+      const pv = this.pv;
+      this.clearPreview();
+      const frame = (x, y, w, h) => {
+        pv.lineWidth = 2;
+        pv.setLineDash([]);
+        pv.strokeStyle = '#ffffff';
+        pv.strokeRect(x + 0.5, y + 0.5, w, h);
+        pv.setLineDash([8, 6]);
+        pv.strokeStyle = '#23262b';
+        pv.strokeRect(x + 0.5, y + 0.5, w, h);
+        pv.setLineDash([]);
+      };
+      if (this.pasting) {
+        const p = this.pasting;
+        pv.drawImage(p.img, p.x, p.y);
+        frame(p.x, p.y, p.w, p.h);
+      } else if (this.tool === 'select' && this.selection) {
+        const s = this.selection;
+        frame(s.x, s.y, s.w, s.h);
+      }
+      paintSelectionButtons();
+    },
+    copySelection() {
+      if (!this.canDraw() || !this.selection) return false;
+      this.clip = { ...this.selection };
+      toast('Gekopieerd. Druk op Ctrl+V of op Plakken en klik waar het moet komen.');
+      paintSelectionButtons();
+      return true;
+    },
+    // The copied piece follows the pointer until a click places it. It is taken from the canvas
+    // as it is now, so what you see floating is exactly what every player gets.
+    startPaste() {
+      if (!this.canDraw() || !this.clip) return false;
+      const { x, y, w, h } = this.clip;
+      const data = this.ctx.getImageData(x, y, w, h);
+      const d = data.data;
+      for (let i = 0; i < d.length; i += 4) if (isBlank(d[i], d[i + 1], d[i + 2])) d[i + 3] = 0;
+      const img = document.createElement('canvas');
+      img.width = w;
+      img.height = h;
+      img.getContext('2d').putImageData(data, 0, 0);
+      this.pasting = { img, w, h, x: Math.min(W - w, x + 24), y: Math.min(H - h, y + 24) };
+      this.drawOverlay();
+      return true;
+    },
+    cancelPaste() {
+      if (!this.pasting) return false;
+      this.pasting = null;
+      this.drawOverlay();
+      return true;
+    },
+
     redraw() {
       this.clearCanvas();
       for (const item of this.log) this.paint(item);
@@ -899,6 +967,22 @@
       if (!this.canDraw()) return;
       e.preventDefault();
       const [x, y] = this.pos(e);
+      if (this.pasting) {
+        // place the piece with its middle under the pointer; the clipboard stays for another paste
+        const { w, h } = this.pasting;
+        const c = this.clip;
+        this.pasting = null;
+        this.local({ k: 'copy', id: this.newId(), sx: c.x, sy: c.y, w, h, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2) });
+        this.drawOverlay();
+        return;
+      }
+      if (this.tool === 'select') {
+        this.canvas.setPointerCapture(e.pointerId);
+        this.selStart = [x, y];
+        this.selection = null;
+        this.drawOverlay();
+        return;
+      }
       if (this.tool === 'fill') return this.local({ k: 'fill', id: this.newId(), x, y, c: this.color });
       if (this.tool === 'picker') {
         const d = this.ctx.getImageData(Math.min(W - 1, Math.max(0, x)), Math.min(H - 1, Math.max(0, y)), 1, 1).data;
@@ -914,7 +998,27 @@
       this.pending = [];
       this.local({ k: 'begin', id: this.drawing, c: this.paintColor(), s: this.size, p: [x, y] });
     },
+    // the frame between two corners, kept inside the canvas
+    frameBetween(a, b) {
+      const clampX = (v) => Math.max(0, Math.min(W, v));
+      const clampY = (v) => Math.max(0, Math.min(H, v));
+      const x1 = clampX(Math.min(a[0], b[0])), x2 = clampX(Math.max(a[0], b[0]));
+      const y1 = clampY(Math.min(a[1], b[1])), y2 = clampY(Math.max(a[1], b[1]));
+      return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+    },
     move(e) {
+      if (this.pasting) {
+        const [x, y] = this.pos(e);
+        this.pasting.x = Math.round(x - this.pasting.w / 2);
+        this.pasting.y = Math.round(y - this.pasting.h / 2);
+        this.drawOverlay();
+        return;
+      }
+      if (this.selStart) {
+        this.selection = this.frameBetween(this.selStart, this.pos(e));
+        this.drawOverlay();
+        return;
+      }
       if (this.shapeStart) {
         const [x, y] = this.pos(e);
         this.clearPreview();
@@ -932,6 +1036,13 @@
       }
     },
     up(e) {
+      if (this.selStart) {
+        if (e && e.clientX !== undefined) this.selection = this.frameBetween(this.selStart, this.pos(e));
+        this.selStart = null;
+        if (this.selection && (this.selection.w < 4 || this.selection.h < 4)) this.selection = null; // a click, not a frame
+        this.drawOverlay();
+        return;
+      }
       if (this.shapeStart) {
         const [x1, y1] = this.shapeStart;
         const [x2, y2] = e && e.clientX !== undefined ? this.pos(e) : [x1, y1];
@@ -957,6 +1068,28 @@
     if (item.k === 'stroke') drawStroke(ctx, item.c, item.s, item.p, 0);
     else if (item.k === 'fill') floodFill(ctx, item.x, item.y, item.c);
     else if (item.k === 'shape') drawShape(ctx, item);
+    else if (item.k === 'copy') copyRegion(ctx, item);
+  }
+  // Empty (white) canvas counts as see-through when a piece is copied, so pasting a drawing
+  // next to or over another one doesn't wipe it out with a white box.
+  const isBlank = (r, g, b) => r >= 250 && g >= 250 && b >= 250;
+  function copyRegion(ctx, it) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    const src = d.slice(); // the piece may be pasted over its own source
+    for (let y = 0; y < it.h; y++) {
+      const ty = it.dy + y;
+      if (ty < 0 || ty >= H) continue;
+      for (let x = 0; x < it.w; x++) {
+        const tx = it.dx + x;
+        if (tx < 0 || tx >= W) continue;
+        const s = ((it.sy + y) * W + it.sx + x) * 4;
+        if (isBlank(src[s], src[s + 1], src[s + 2])) continue;
+        const t = (ty * W + tx) * 4;
+        d[t] = src[s]; d[t + 1] = src[s + 1]; d[t + 2] = src[s + 2]; d[t + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
   }
   // Draws stroke points from coordinate index `from` onward (0 = the whole stroke).
   function drawStroke(ctx, c, s, p, from) {
@@ -1866,8 +1999,15 @@
   }
   function setTool(t) {
     Board.tool = t;
+    Board.pasting = null; // picking a tool cancels a paste that was still floating
     $('#canvas').classList.toggle('fill-cursor', t === 'fill' || t === 'picker');
     paintToolbar();
+    Board.drawOverlay();
+  }
+  function paintSelectionButtons() {
+    $('#btn-copy-sel').disabled = !Board.selection || Board.tool !== 'select';
+    $('#btn-paste').disabled = !Board.clip;
+    $('#btn-paste').classList.toggle('active', !!Board.pasting);
   }
   function paintToolbar() {
     const custom = !PALETTE.includes(Board.color);
@@ -2172,7 +2312,9 @@
     $('#chat-input').addEventListener('input', updateGuessCount);
 
     // keyboard: shortcuts for the drawer; typing anywhere focuses the chat for guessers
-    const TOOL_KEYS = { b: 'pen', p: 'pen', e: 'eraser', f: 'fill', l: 'line', r: 'rect', o: 'ellipse', i: 'picker' };
+    const TOOL_KEYS = { b: 'pen', p: 'pen', e: 'eraser', f: 'fill', l: 'line', r: 'rect', o: 'ellipse', i: 'picker', s: 'select' };
+    $('#btn-copy-sel').addEventListener('click', () => Board.copySelection());
+    $('#btn-paste').addEventListener('click', () => { if (!Board.cancelPaste()) Board.startPaste(); });
     document.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -2180,6 +2322,12 @@
       if (Board.canDraw()) {
         if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) { e.preventDefault(); return Board.undo(); }
         if ((e.ctrlKey || e.metaKey) && (key === 'y' || (key === 'z' && e.shiftKey))) { e.preventDefault(); return Board.redo(); }
+        if ((e.ctrlKey || e.metaKey) && key === 'c') { if (Board.copySelection()) e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && key === 'v') { if (Board.startPaste()) e.preventDefault(); return; }
+        if (key === 'escape') {
+          if (!Board.cancelPaste() && Board.selection) { Board.selection = null; Board.drawOverlay(); }
+          return;
+        }
         if (!e.ctrlKey && !e.metaKey && !e.altKey && TOOL_KEYS[key]) return setTool(TOOL_KEYS[key]);
         if (!e.ctrlKey && !e.metaKey && key >= '1' && key <= '4') { Board.size = SIZES[+key - 1]; return paintToolbar(); }
         return;

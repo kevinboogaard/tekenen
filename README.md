@@ -26,8 +26,8 @@ woordmodus normaal/verborgen · max. spelers (2–16).
 
 ## Tekengereedschap
 20 kleuren + eigen kleur · 4 diktes · pen · gum · emmer · lijn · rechthoek · ellips ·
-pipet · ongedaan maken · opnieuw · alles wissen.
-Sneltoetsen: B pen, E gum, F emmer, L lijn, R rechthoek, O ellips, I pipet,
+pipet · selecteren, kopiëren en plakken · ongedaan maken · opnieuw · alles wissen.
+Sneltoetsen: B pen, E gum, F emmer, L lijn, R rechthoek, O ellips, I pipet, S selecteren, Ctrl+C / Ctrl+V,
 1–4 dikte, Ctrl+Z / Ctrl+Y.
 
 ## Spelers beheren
