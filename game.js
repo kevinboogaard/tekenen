@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 16; // keep in sync with the ?v= in index.html
+  const VERSION = 17; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -140,9 +140,16 @@
       }
       case 'fill': log.push({ k: 'fill', id: op.id, x: op.x, y: op.y, c: op.c }); break;
       case 'shape': log.push({ k: 'shape', id: op.id, sh: op.sh, c: op.c, s: op.s, x1: op.x1, y1: op.y1, x2: op.x2, y2: op.y2 }); break;
-      case 'copy': log.push({ k: 'copy', id: op.id, sx: op.sx, sy: op.sy, w: op.w, h: op.h, dx: op.dx, dy: op.dy }); break;
+      // 'clip' is the moment of copying: every screen takes a snapshot of that piece right then.
+      // 'paste' puts that snapshot somewhere, whatever happened to the canvas in between.
+      case 'clip': log.push({ k: 'clip', id: op.id, x: op.x, y: op.y, w: op.w, h: op.h }); break;
+      case 'paste': log.push({ k: 'paste', id: op.id, clip: op.clip, dx: op.dx, dy: op.dy }); break;
       case 'item': log.push(clone(op.it)); break;
-      case 'undo': log.pop(); break;
+      case 'undo':
+        // a snapshot taken after the step being undone would no longer match: drop it as well
+        while (log.length && log[log.length - 1].k === 'clip') log.pop();
+        log.pop();
+        break;
       case 'clear': log.length = 0; break;
     }
   }
@@ -153,14 +160,14 @@
     if (it.k === 'stroke') return isCol(it.c) && SIZES.includes(it.s) && Array.isArray(it.p) && it.p.length >= 2 && it.p.length <= 40000 && it.p.every(isNum);
     if (it.k === 'fill') return isCol(it.c) && isNum(it.x) && isNum(it.y);
     if (it.k === 'shape') return SHAPES.includes(it.sh) && isCol(it.c) && SIZES.includes(it.s) && [it.x1, it.y1, it.x2, it.y2].every(isNum);
-    if (it.k === 'copy') {
-      // a piece of the canvas (inside it) pasted somewhere else (may hang over the edge)
-      return [it.sx, it.sy, it.w, it.h, it.dx, it.dy].every(Number.isInteger)
-        && it.w >= 1 && it.h >= 1 && it.sx >= 0 && it.sy >= 0 && it.sx + it.w <= W && it.sy + it.h <= H
-        && Math.abs(it.dx) <= W && Math.abs(it.dy) <= H;
-    }
+    // a pasted piece may hang over the edge of the canvas
+    if (it.k === 'paste') return isId(it.clip) && Number.isInteger(it.dx) && Number.isInteger(it.dy) && Math.abs(it.dx) <= W && Math.abs(it.dy) <= H;
     return false;
   }
+  const isId = (s) => typeof s === 'string' && s.length > 0 && s.length <= 64;
+  // the copied piece itself always lies inside the canvas
+  const validClip = (op) => isId(op.id) && [op.x, op.y, op.w, op.h].every(Number.isInteger)
+    && op.w >= 1 && op.h >= 1 && op.x >= 0 && op.y >= 0 && op.x + op.w <= W && op.y + op.h <= H;
   function validOp(op) {
     if (!op || typeof op !== 'object') return false;
     switch (op.k) {
@@ -168,7 +175,8 @@
       case 'pts': return Array.isArray(op.p) && op.p.length <= 400 && op.p.every(isNum);
       case 'fill': return isCol(op.c) && isNum(op.x) && isNum(op.y);
       case 'shape': return validItem({ ...op, k: 'shape' });
-      case 'copy': return validItem({ ...op, k: 'copy' });
+      case 'clip': return validClip(op);
+      case 'paste': return validItem({ ...op, k: 'paste' });
       case 'item': return validItem(op.it);
       case 'undo': case 'clear': return true;
     }
@@ -840,6 +848,7 @@
       this.selStart = null;
       this.selection = null;
       this.clip = null;
+      this.clips = {};
       this.pasting = null;
       this.pending = [];
       this.tool = 'pen'; // every turn starts with the pen, not a leftover fill bucket
@@ -878,19 +887,24 @@
       }
       paintSelectionButtons();
     },
+    // Copying takes a snapshot right now, on every player's screen. Whatever is drawn, erased
+    // or moved afterwards, pasting always gives this snapshot.
     copySelection() {
       if (!this.canDraw() || !this.selection) return false;
-      this.clip = { ...this.selection };
+      const s = this.selection;
+      const id = this.newId();
+      this.clip = { id, w: s.w, h: s.h, x: s.x, y: s.y };
+      this.local({ k: 'clip', id, x: s.x, y: s.y, w: s.w, h: s.h });
       toast('Gekopieerd. Druk op Ctrl+V of op Plakken en klik waar het moet komen.');
       paintSelectionButtons();
       return true;
     },
-    // The copied piece follows the pointer until a click places it. It is taken from the canvas
-    // as it is now, so what you see floating is exactly what every player gets.
+    // The copied piece follows the pointer until a click places it.
     startPaste() {
-      if (!this.canDraw() || !this.clip) return false;
+      const snap = this.clip && this.clips[this.clip.id];
+      if (!this.canDraw() || !snap) return false;
       const { x, y, w, h } = this.clip;
-      const data = this.ctx.getImageData(x, y, w, h);
+      const data = new ImageData(new Uint8ClampedArray(snap.data), w, h);
       const d = data.data;
       for (let i = 0; i < d.length; i += 4) if (isBlank(d[i], d[i + 1], d[i + 2])) d[i + 3] = 0;
       const img = document.createElement('canvas');
@@ -910,9 +924,10 @@
 
     redraw() {
       this.clearCanvas();
+      this.clips = {}; // snapshots are taken again at the same moments while replaying the steps
       for (const item of this.log) this.paint(item);
     },
-    paint(item) { paintItem(this.ctx, item); },
+    paint(item) { paintItem(this.ctx, item, this.clips); },
     strokePts(c, s, p, from) { drawStroke(this.ctx, c, s, p, from); },
 
     // apply an operation (from network or local) and render it incrementally
@@ -939,7 +954,7 @@
       return [Math.round(((e.clientX - r.left) / r.width) * W), Math.round(((e.clientY - r.top) / r.height) * H)];
     },
     local(op) {
-      if (op.k !== 'pts' && op.k !== 'undo' && !(op.k === 'item' && op.redo)) this.redoStack = [];
+      if (op.k !== 'pts' && op.k !== 'undo' && op.k !== 'clip' && !(op.k === 'item' && op.redo)) this.redoStack = [];
       delete op.redo;
       this.apply(op);
       Client.send({ t: 'draw', op });
@@ -948,9 +963,23 @@
     paintColor() { return this.tool === 'eraser' ? '#ffffff' : this.color; },
 
     undo() {
-      if (!this.canDraw() || !this.log.length) return;
-      this.redoStack.push(clone(this.log[this.log.length - 1]));
+      if (!this.canDraw()) return;
+      // copies made after the step being undone go with it (see applyToLog)
+      let i = this.log.length - 1;
+      const dropped = [];
+      while (i >= 0 && this.log[i].k === 'clip') dropped.push(this.log[i--].id);
+      if (i < 0) return; // nothing drawn to undo
+      this.redoStack.push(clone(this.log[i]));
+      if (dropped.length) {
+        this.redoStack = this.redoStack.filter((it) => !(it.k === 'paste' && dropped.includes(it.clip)));
+        if (this.clip && dropped.includes(this.clip.id)) {
+          this.clip = null;
+          this.pasting = null;
+          toast('Je kopie is vervallen door het ongedaan maken. Kopieer opnieuw.');
+        }
+      }
       this.local({ k: 'undo' });
+      this.drawOverlay();
     },
     redo() {
       if (!this.canDraw() || !this.redoStack.length) return;
@@ -960,7 +989,10 @@
     },
     clearAll() {
       if (!this.canDraw() || !this.log.length) return;
+      this.clip = null;
+      this.pasting = null;
       this.local({ k: 'clear' });
+      this.drawOverlay();
     },
 
     down(e) {
@@ -972,7 +1004,7 @@
         const { w, h } = this.pasting;
         const c = this.clip;
         this.pasting = null;
-        this.local({ k: 'copy', id: this.newId(), sx: c.x, sy: c.y, w, h, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2) });
+        this.local({ k: 'paste', id: this.newId(), clip: c.id, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2) });
         this.drawOverlay();
         return;
       }
@@ -1064,26 +1096,28 @@
     },
   };
 
-  function paintItem(ctx, item) {
+  // `clips` holds the snapshots taken by 'clip' steps of this drawing, by id.
+  function paintItem(ctx, item, clips) {
     if (item.k === 'stroke') drawStroke(ctx, item.c, item.s, item.p, 0);
     else if (item.k === 'fill') floodFill(ctx, item.x, item.y, item.c);
     else if (item.k === 'shape') drawShape(ctx, item);
-    else if (item.k === 'copy') copyRegion(ctx, item);
+    else if (item.k === 'clip') { if (clips) clips[item.id] = ctx.getImageData(item.x, item.y, item.w, item.h); }
+    else if (item.k === 'paste') { if (clips && clips[item.clip]) pasteSnapshot(ctx, clips[item.clip], item.dx, item.dy); }
   }
   // Empty (white) canvas counts as see-through when a piece is copied, so pasting a drawing
   // next to or over another one doesn't wipe it out with a white box.
   const isBlank = (r, g, b) => r >= 250 && g >= 250 && b >= 250;
-  function copyRegion(ctx, it) {
+  function pasteSnapshot(ctx, snap, dx, dy) {
     const img = ctx.getImageData(0, 0, W, H);
     const d = img.data;
-    const src = d.slice(); // the piece may be pasted over its own source
-    for (let y = 0; y < it.h; y++) {
-      const ty = it.dy + y;
+    const src = snap.data;
+    for (let y = 0; y < snap.height; y++) {
+      const ty = dy + y;
       if (ty < 0 || ty >= H) continue;
-      for (let x = 0; x < it.w; x++) {
-        const tx = it.dx + x;
+      for (let x = 0; x < snap.width; x++) {
+        const tx = dx + x;
         if (tx < 0 || tx >= W) continue;
-        const s = ((it.sy + y) * W + it.sx + x) * 4;
+        const s = (y * snap.width + x) * 4;
         if (isBlank(src[s], src[s + 1], src[s + 2])) continue;
         const t = (ty * W + tx) * 4;
         d[t] = src[s]; d[t + 1] = src[s + 1]; d[t + 2] = src[s + 2]; d[t + 3] = 255;
@@ -1131,7 +1165,7 @@
     raf: 0,
     nextTimer: 0,
 
-    weight(it) { return it.k === 'stroke' ? Math.max(1, it.p.length / 2) : 12; },
+    weight(it) { return it.k === 'stroke' ? Math.max(1, it.p.length / 2) : it.k === 'clip' ? 1 : 12; }, // copying shows nothing: no pause
     open(list) {
       this.list = list.filter((g) => g.log && g.log.length);
       if (!this.list.length) return;
@@ -1149,6 +1183,7 @@
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fillRect(0, 0, W, H);
       this.item = this.drawn = this.spent = this.elapsed = 0;
+      this.clips = {};
       this.total = g.log.reduce((n, it) => n + this.weight(it), 0);
       this.duration = Math.min(12000, Math.max(2500, this.total * 14)); // always watchable, never endless
       this.paused = false;
@@ -1172,8 +1207,8 @@
           this.drawn = upto;
           if (this.drawn >= n) { this.item++; this.drawn = 0; }
         } else {
-          paintItem(this.ctx, it);
-          this.spent += 12;
+          paintItem(this.ctx, it, this.clips);
+          this.spent += this.weight(it);
           this.item++;
         }
       }
