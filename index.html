@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Bump ?v= on every release so browsers never run a cached older version -->
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
   <!-- ========== HOME ========== -->
@@ -42,7 +42,7 @@
       </div>
 
       <p id="home-error" class="error" role="alert"></p>
-      <p class="version muted small">versie 19 · tot 500 woorden per speler</p>
+      <p class="version muted small">versie 20 · tot 500 woorden per speler</p>
     </div>
     <details class="how">
       <summary>Hoe werkt het?</summary>
@@ -226,13 +226,15 @@
               <button class="tool" data-tool="picker" title="Pipet — kleur oppakken (I)">💧</button>
             </div>
             <div class="tool-group">
-              <button class="tool" data-tool="select" title="Selecteren — sleep een kader. Daarna: sleep binnen het kader om te verplaatsen, of aan de blokjes om te schalen (S)" aria-label="Selecteren"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1" stroke-dasharray="3.2 2.6"/></svg></button>
+              <button class="tool" data-tool="select" title="Selecteren — sleep een kader. Daarna: sleep binnen het kader om te verplaatsen, aan de blokjes om te schalen, of aan het gele bolletje om te draaien (S)" aria-label="Selecteren"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1" stroke-dasharray="3.2 2.6"/></svg></button>
               <button id="btn-copy-sel" class="tool" title="Selectie kopiëren (Ctrl+C)" aria-label="Kopiëren" disabled><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="1.5"/><path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H14"/></svg></button>
               <button id="btn-paste" class="tool" title="Plakken — klik daarna op de plek waar het moet komen (Ctrl+V)" aria-label="Plakken" disabled><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="1.5"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h6"/></svg></button>
             </div>
             <div class="tool-group">
               <button class="tool" data-transform="fx" title="Horizontaal spiegelen (H)" aria-label="Horizontaal spiegelen" disabled><svg viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2.5 2.5"/><path d="M9 7L3 12l6 5z"/><path d="M15 7l6 5-6 5z" fill="currentColor"/></svg></button>
               <button class="tool" data-transform="fy" title="Verticaal spiegelen (V)" aria-label="Verticaal spiegelen" disabled><svg viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2.5 2.5"/><path d="M7 9l5-6 5 6z"/><path d="M7 15l5 6 5-6z" fill="currentColor"/></svg></button>
+              <button class="tool" data-transform="rotl" title="90° linksom draaien (,)" aria-label="Linksom draaien" disabled><svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2.2-5.1"/><path d="M5 4v4.5h4.5"/></svg></button>
+              <button class="tool" data-transform="rotr" title="90° rechtsom draaien (.)" aria-label="Rechtsom draaien" disabled><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.2-5.1"/><path d="M19 4v4.5h-4.5"/></svg></button>
               <button class="tool" data-transform="bigger" title="Groter (+)" aria-label="Groter" disabled><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5" stroke-dasharray="3 2.5"/><path d="M12 8v8M8 12h8"/></svg></button>
               <button class="tool" data-transform="smaller" title="Kleiner (-)" aria-label="Kleiner" disabled><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5" stroke-dasharray="3 2.5"/><path d="M8 12h8"/></svg></button>
             </div>
@@ -305,8 +307,8 @@
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="words.js?v=19"></script>
-  <script src="wordbank.js?v=19"></script>
-  <script src="game.js?v=19"></script>
+  <script src="words.js?v=20"></script>
+  <script src="wordbank.js?v=20"></script>
+  <script src="game.js?v=20"></script>
 </body>
 </html>

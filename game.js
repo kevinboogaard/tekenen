@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 19; // keep in sync with the ?v= in index.html
+  const VERSION = 20; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -144,7 +144,7 @@
       // 'paste' puts that snapshot somewhere, whatever happened to the canvas in between.
       case 'clip': log.push({ k: 'clip', id: op.id, x: op.x, y: op.y, w: op.w, h: op.h }); break;
       // w/h: pasted at another size; fx/fy: mirrored; cut: the original spot is emptied first
-      case 'paste': log.push({ k: 'paste', id: op.id, clip: op.clip, dx: op.dx, dy: op.dy, w: op.w, h: op.h, fx: !!op.fx, fy: !!op.fy, cut: !!op.cut }); break;
+      case 'paste': log.push({ k: 'paste', id: op.id, clip: op.clip, dx: op.dx, dy: op.dy, w: op.w, h: op.h, fx: !!op.fx, fy: !!op.fy, rot: op.rot | 0, cut: !!op.cut }); break; // rot: turned this many degrees (clockwise) around its middle
       case 'item': log.push(clone(op.it)); break;
       case 'undo':
         // a snapshot taken after the step being undone would no longer match: drop it as well
@@ -165,7 +165,8 @@
     if (it.k === 'paste') {
       const size = (v, max) => v === undefined || v === null || (Number.isInteger(v) && v >= 1 && v <= max);
       return isId(it.clip) && Number.isInteger(it.dx) && Number.isInteger(it.dy) && Math.abs(it.dx) <= 2 * W && Math.abs(it.dy) <= 2 * H
-        && size(it.w, MAX_PASTE_W) && size(it.h, MAX_PASTE_H);
+        && size(it.w, MAX_PASTE_W) && size(it.h, MAX_PASTE_H)
+        && (it.rot === undefined || it.rot === null || (Number.isInteger(it.rot) && Math.abs(it.rot) <= 360));
     }
     return false;
   }
@@ -875,47 +876,72 @@
     drawOverlay() {
       const pv = this.pv;
       this.clearPreview();
-      const frame = (x, y, w, h) => {
+      // the dashed frame, turned together with the piece
+      const frame = (r) => {
+        pv.save();
+        pv.translate(r.x + r.w / 2, r.y + r.h / 2);
+        pv.rotate(rad(r.rot || 0));
         pv.lineWidth = 2;
         pv.setLineDash([]);
         pv.strokeStyle = '#ffffff';
-        pv.strokeRect(x + 0.5, y + 0.5, w, h);
+        pv.strokeRect(-r.w / 2, -r.h / 2, r.w, r.h);
         pv.setLineDash([8, 6]);
         pv.strokeStyle = '#23262b';
-        pv.strokeRect(x + 0.5, y + 0.5, w, h);
+        pv.strokeRect(-r.w / 2, -r.h / 2, r.w, r.h);
         pv.setLineDash([]);
+        pv.restore();
       };
-      // the little squares you grab to resize, like in Paint
+      // the little squares you grab to resize, like in Paint, and the round one to turn
       const handles = (r) => {
         const hs = this.screenPx(9);
         pv.lineWidth = Math.max(1, this.screenPx(1.5));
         pv.fillStyle = '#ffffff';
         pv.strokeStyle = '#23262b';
-        for (const [hx, hy] of handlePoints(r)) {
+        const pts = handlePoints(r);
+        const rh = rotHandle(r, this.screenPx(26));
+        const edge = pts[rh.below ? 5 : 1];
+        pv.beginPath();
+        pv.moveTo(edge[0], edge[1]);
+        pv.lineTo(rh.p[0], rh.p[1]);
+        pv.stroke();
+        for (const [hx, hy] of pts) {
           pv.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
           pv.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
         }
+        pv.beginPath();
+        pv.arc(rh.p[0], rh.p[1], hs * 0.65, 0, Math.PI * 2);
+        pv.fillStyle = '#ffd23f';
+        pv.fill();
+        pv.stroke();
       };
       if (this.pasting) {
         const p = this.pasting;
-        pv.drawImage(p.img, p.x, p.y);
-        frame(p.x, p.y, p.w, p.h);
+        pv.save();
+        pv.translate(p.x + p.w / 2, p.y + p.h / 2);
+        pv.rotate(rad(p.rot || 0));
+        pv.drawImage(p.img, -p.w / 2, -p.h / 2);
+        pv.restore();
+        frame(p);
       } else if (this.grab) {
-        // while dragging: hide the piece where it was and show it at its new place and size
+        // while dragging: hide the piece where it was and show it at its new place, size and angle
         const { L, start, rect: r } = this.grab;
         pv.fillStyle = '#ffffff';
-        pv.fillRect(start.x, start.y, start.w, start.h);
+        pv.beginPath();
+        rectCorners(start).forEach(([cx, cy], i) => (i ? pv.lineTo(cx, cy) : pv.moveTo(cx, cy)));
+        pv.closePath();
+        pv.fill();
         pv.save();
         pv.imageSmoothingEnabled = false;
-        pv.translate(r.x + (L.fx ? r.w : 0), r.y + (L.fy ? r.h : 0));
+        pv.translate(r.x + r.w / 2, r.y + r.h / 2);
+        pv.rotate(rad(r.rot || 0));
         pv.scale(L.fx ? -1 : 1, L.fy ? -1 : 1);
-        pv.drawImage(L.float, 0, 0, r.w, r.h);
+        pv.drawImage(L.float, -r.w / 2, -r.h / 2, r.w, r.h);
         pv.restore();
-        frame(r.x, r.y, r.w, r.h);
+        frame(r);
         handles(r);
       } else if (this.tool === 'select' && this.selection) {
         const s = this.selection;
-        frame(s.x, s.y, s.w, s.h);
+        frame(s);
         if (!this.selStart) handles(s);
       }
       paintSelectionButtons();
@@ -928,6 +954,8 @@
       if (!s) return null;
       const tol = this.screenPx(10);
       const names = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+      const rh = rotHandle(s, this.screenPx(26));
+      if (Math.hypot(x - rh.p[0], y - rh.p[1]) <= tol) return rh.below ? 'rotb' : 'rot';
       const pts = handlePoints(s);
       // on a small frame the handles overlap: the nearest one wins
       let best = null;
@@ -937,17 +965,20 @@
         if (Math.abs(x - pts[i][0]) <= tol && Math.abs(y - pts[i][1]) <= tol && dist < bestDist) { best = names[i]; bestDist = dist; }
       }
       if (best) return best;
-      return x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h ? 'move' : null;
+      // inside the frame, which may be turned
+      const [lx, ly] = toLocal(s, x, y);
+      return Math.abs(lx) <= s.w / 2 && Math.abs(ly) <= s.h / 2 ? 'move' : null;
     },
     // The change in progress on this selection (so the next drag or click continues it), or a
     // fresh one. A change is: lift the selected piece, then put it back moved, resized or mirrored.
     liveFor() {
       const last = this.log[this.log.length - 1];
       if (this.live && last && last.id === this.live.pasteId) return this.live;
-      const sel = this.selection;
-      const s = this.frameBetween([sel.x, sel.y], [sel.x + sel.w, sel.y + sel.h]);
+      // a turned frame that is no longer backed by its own change: lift what lies in its bounding box
+      const b = rectBounds(this.selection);
+      const s = this.frameBetween([b.x, b.y], [b.x + b.w, b.y + b.h]);
       if (s.w < 1 || s.h < 1) return null;
-      return { clip: this.newId(), bx: s.x, by: s.y, bw: s.w, bh: s.h, x: s.x, y: s.y, w: s.w, h: s.h, fx: false, fy: false, pasteId: null, float: null };
+      return { clip: this.newId(), bx: s.x, by: s.y, bw: s.w, bh: s.h, x: s.x, y: s.y, w: s.w, h: s.h, rot: 0, fx: false, fy: false, pasteId: null, float: null };
     },
     // Put the lifted piece at rectangle r. Replaces the previous version of the same change, so
     // however often you drag or click, it stays one undo step and is always made from the original.
@@ -956,10 +987,10 @@
       if (w < 4 || h < 4 || w > MAX_PASTE_W || h > MAX_PASTE_H) return false; // as small or large as it gets
       if (L.pasteId) this.local({ k: 'undo' });
       else this.local({ k: 'clip', id: L.clip, x: L.bx, y: L.by, w: L.bw, h: L.bh });
-      Object.assign(L, { x: Math.round(r.x), y: Math.round(r.y), w, h, fx: !!r.fx, fy: !!r.fy, pasteId: this.newId() });
+      Object.assign(L, { x: Math.round(r.x), y: Math.round(r.y), w, h, fx: !!r.fx, fy: !!r.fy, rot: normRot(r.rot || 0), pasteId: this.newId() });
       this.live = L;
-      this.local({ k: 'paste', id: L.pasteId, clip: L.clip, dx: L.x, dy: L.y, w, h, fx: L.fx, fy: L.fy, cut: true });
-      this.selection = { x: L.x, y: L.y, w, h };
+      this.local({ k: 'paste', id: L.pasteId, clip: L.clip, dx: L.x, dy: L.y, w, h, fx: L.fx, fy: L.fy, rot: L.rot, cut: true });
+      this.selection = { x: L.x, y: L.y, w, h, rot: L.rot };
       this.drawOverlay();
       return true;
     },
@@ -967,9 +998,10 @@
     // or moved afterwards, pasting always gives this snapshot.
     copySelection() {
       if (!this.canDraw() || !this.selection) return false;
-      // a moved or enlarged frame can hang over the edge: only the part on the canvas is copied
-      const sel = this.selection;
-      const s = this.frameBetween([sel.x, sel.y], [sel.x + sel.w, sel.y + sel.h]);
+      // a moved, enlarged or turned frame can hang over the edge: only the part on the canvas
+      // (inside the frame's outer box) is copied
+      const b = rectBounds(this.selection);
+      const s = this.frameBetween([b.x, b.y], [b.x + b.w, b.y + b.h]);
       if (s.w < 1 || s.h < 1) return false;
       const id = this.newId();
       this.clip = { id, w: s.w, h: s.h, x: s.x, y: s.y };
@@ -983,7 +1015,7 @@
       const snap = this.clip && this.clips[this.clip.id];
       if (!this.canDraw() || !snap) return false;
       const { x, y, w, h } = this.clip;
-      this.pasting = { scale: 1, fx: false, fy: false, w, h, img: null, x: Math.min(W - w, x + 24), y: Math.min(H - h, y + 24) };
+      this.pasting = { scale: 1, fx: false, fy: false, rot: 0, w, h, img: null, x: Math.min(W - w, x + 24), y: Math.min(H - h, y + 24) };
       this.refloat();
       return true;
     },
@@ -1014,27 +1046,32 @@
     // Pressing again keeps working from the original pixels, so it doesn't get blurrier each time.
     transform(what) {
       if (!this.canTransform()) return;
-      const next = (t, base) => {
-        const o = { scale: t.scale, fx: t.fx, fy: t.fy };
-        if (what === 'fx') o.fx = !o.fx;
-        if (what === 'fy') o.fy = !o.fy;
-        if (what === 'bigger') o.scale *= 1.25;
-        if (what === 'smaller') o.scale /= 1.25;
-        const w = Math.round(base.w * o.scale), h = Math.round(base.h * o.scale);
-        if (w < 4 || h < 4 || w > MAX_PASTE_W || h > MAX_PASTE_H) return null; // as small or large as it gets
-        return o;
-      };
+      // Mirroring is as seen on screen: the piece's own flip toggles and a turned piece turns the
+      // other way round. (Flip and turn together: flip first, then turn.)
       if (this.pasting) {
-        const o = next(this.pasting, this.clip);
-        if (!o) return;
-        Object.assign(this.pasting, o);
+        const p = this.pasting;
+        if (what === 'fx' || what === 'fy') {
+          if (what === 'fx') p.fx = !p.fx; else p.fy = !p.fy;
+          p.rot = normRot(-(p.rot || 0));
+          return this.refloat();
+        }
+        if (what === 'rotl' || what === 'rotr') {
+          p.rot = normRot((p.rot || 0) + (what === 'rotr' ? 90 : -90));
+          return this.drawOverlay();
+        }
+        const scale = p.scale * (what === 'bigger' ? 1.25 : 1 / 1.25);
+        const w = Math.round(this.clip.w * scale), h = Math.round(this.clip.h * scale);
+        if (w < 4 || h < 4 || w > MAX_PASTE_W || h > MAX_PASTE_H) return; // as small or large as it gets
+        p.scale = scale;
         return this.refloat();
       }
       const L = this.liveFor();
       if (!L) return;
-      const r = { x: L.x, y: L.y, w: L.w, h: L.h, fx: L.fx, fy: L.fy };
-      if (what === 'fx') r.fx = !r.fx;
-      if (what === 'fy') r.fy = !r.fy;
+      const r = { x: L.x, y: L.y, w: L.w, h: L.h, fx: L.fx, fy: L.fy, rot: L.rot || 0 };
+      if (what === 'fx') { r.fx = !r.fx; r.rot = -r.rot; }
+      if (what === 'fy') { r.fy = !r.fy; r.rot = -r.rot; }
+      if (what === 'rotl') r.rot -= 90;
+      if (what === 'rotr') r.rot += 90;
       if (what === 'bigger' || what === 'smaller') {
         // grow or shrink around the middle
         const f = what === 'bigger' ? 1.25 : 0.8;
@@ -1137,10 +1174,10 @@
       const [x, y] = this.pos(e);
       if (this.pasting) {
         // place the piece with its middle under the pointer; the clipboard stays for another paste
-        const { w, h, fx, fy } = this.pasting;
+        const { w, h, fx, fy, rot } = this.pasting;
         const c = this.clip;
         this.pasting = null;
-        this.local({ k: 'paste', id: this.newId(), clip: c.id, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2), w, h, fx, fy });
+        this.local({ k: 'paste', id: this.newId(), clip: c.id, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2), w, h, fx, fy, rot: normRot(rot || 0) });
         this.drawOverlay();
         return;
       }
@@ -1151,7 +1188,7 @@
         const L = hit && this.liveFor();
         if (L) {
           if (!L.float) L.float = floatCanvas(L.pasteId ? this.clips[L.clip].img : this.ctx.getImageData(L.bx, L.by, L.bw, L.bh));
-          const start = { x: L.x, y: L.y, w: L.w, h: L.h };
+          const start = { x: L.x, y: L.y, w: L.w, h: L.h, rot: L.rot || 0 };
           this.grab = { hit, L, px: x, py: y, start, rect: { ...start } };
           this.drawOverlay();
           return;
@@ -1196,7 +1233,10 @@
       if (this.grab) {
         const [x, y] = this.pos(e);
         const g = this.grab;
-        g.rect = dragRect(g.hit, g.start, x - g.px, y - g.py, e.shiftKey);
+        // the round handle turns (Shift: in steps of 15 degrees), the others resize or move
+        g.rect = g.hit === 'rot' || g.hit === 'rotb'
+          ? turnRect(g.start, x, y, e.shiftKey, g.hit === 'rotb')
+          : dragRect(g.hit, g.start, x - g.px, y - g.py, e.shiftKey);
         this.drawOverlay();
         return;
       }
@@ -1208,7 +1248,7 @@
       if (this.tool === 'select' && this.canDraw() && !this.drawing) {
         // show what a click here would do
         const hit = this.hitSelection(...this.pos(e));
-        this.canvas.style.cursor = hit ? HANDLE_CURSORS[hit] : '';
+        this.canvas.style.cursor = hit ? cursorFor(hit, this.selection.rot) : '';
       }
       if (this.shapeStart) {
         const [x, y] = this.pos(e);
@@ -1230,7 +1270,7 @@
       if (this.grab) {
         const { L, start, rect: r } = this.grab;
         this.grab = null;
-        const changed = r.x !== start.x || r.y !== start.y || r.w !== start.w || r.h !== start.h;
+        const changed = r.x !== start.x || r.y !== start.y || r.w !== start.w || r.h !== start.h || (r.rot || 0) !== (start.rot || 0);
         if (!changed || !this.canDraw() || !this.commitLive(L, { ...r, fx: L.fx, fy: L.fy })) this.drawOverlay();
         return;
       }
@@ -1274,22 +1314,78 @@
   // next to or over another one doesn't wipe it out with a white box.
   const isBlank = (r, g, b) => r >= 250 && g >= 250 && b >= 250;
   // ---- dragging a selection like in Paint
-  const HANDLE_CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', move: 'move' };
+  // A frame is {x, y, w, h, rot}: a rectangle turned `rot` degrees clockwise around its middle.
+  const rad = (deg) => (deg * Math.PI) / 180;
+  // rounded so every browser rounds the pixels the same way
+  const trig = (deg) => [Math.round(Math.cos(rad(deg)) * 1e6) / 1e6, Math.round(Math.sin(rad(deg)) * 1e6) / 1e6];
+  const normRot = (a) => {
+    let r = Math.round(a) % 360;
+    if (r > 180) r -= 360;
+    if (r <= -180) r += 360;
+    return r;
+  };
+  // a spot given relative to the frame's middle (in the frame's own directions) -> canvas position
+  function rotPoint(r, lx, ly) {
+    const [c, s] = trig(r.rot || 0);
+    return [r.x + r.w / 2 + lx * c - ly * s, r.y + r.h / 2 + lx * s + ly * c];
+  }
+  // and back: a canvas position -> relative to the middle, in the frame's own directions
+  function toLocal(r, x, y) {
+    const [c, s] = trig(r.rot || 0);
+    const dx = x - (r.x + r.w / 2), dy = y - (r.y + r.h / 2);
+    return [dx * c + dy * s, -dx * s + dy * c];
+  }
+  function rectCorners(r) {
+    const hw = r.w / 2, hh = r.h / 2;
+    return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([a, b]) => rotPoint(r, a, b));
+  }
+  // the smallest straight box around a (turned) frame
+  function rectBounds(r) {
+    const pts = rectCorners(r);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const x = Math.floor(Math.min(...xs)), y = Math.floor(Math.min(...ys));
+    return { x, y, w: Math.ceil(Math.max(...xs)) - x, h: Math.ceil(Math.max(...ys)) - y };
+  }
   // the eight grab points of a frame, clockwise from the top-left corner
   function handlePoints(r) {
-    const x2 = r.x + r.w, y2 = r.y + r.h, mx = r.x + r.w / 2, my = r.y + r.h / 2;
-    return [[r.x, r.y], [mx, r.y], [x2, r.y], [x2, my], [x2, y2], [mx, y2], [r.x, y2], [r.x, my]];
+    const hw = r.w / 2, hh = r.h / 2;
+    return [[-hw, -hh], [0, -hh], [hw, -hh], [hw, 0], [hw, hh], [0, hh], [-hw, hh], [-hw, 0]].map(([a, b]) => rotPoint(r, a, b));
   }
-  // The frame after dragging `hit` by (dx, dy). The opposite side stays where it is.
-  // With Shift held, a corner keeps the proportions.
+  // the round turn handle sits `dist` above the top edge, or below the bottom edge if the top
+  // is too close to the top of the canvas for it
+  function rotHandle(r, dist) {
+    const up = rotPoint(r, 0, -r.h / 2 - dist);
+    if (up[1] >= dist * 0.4) return { p: up, below: false };
+    return { p: rotPoint(r, 0, r.h / 2 + dist), below: true };
+  }
+  // the resize arrows turn along with the frame
+  const HANDLE_ANGLE = { e: 0, se: 45, s: 90, sw: 135, w: 180, nw: 225, n: 270, ne: 315 };
+  function cursorFor(hit, rot) {
+    if (hit === 'move') return 'move';
+    if (hit === 'rot' || hit === 'rotb') return 'grab';
+    const a = (((HANDLE_ANGLE[hit] + (rot || 0)) % 180) + 180) % 180;
+    return ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'][Math.round(a / 45) % 4];
+  }
+  // The frame turned so that the round handle points at (x, y).
+  function turnRect(s, x, y, snap, below) {
+    const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+    let ang = (Math.atan2(y - cy, x - cx) * 180) / Math.PI + (below ? -90 : 90);
+    if (snap) ang = Math.round(ang / 15) * 15;
+    return { x: s.x, y: s.y, w: s.w, h: s.h, rot: normRot(ang) };
+  }
+  // The frame after dragging `hit` by (dx, dy). The opposite side stays where it is, also when
+  // the frame is turned. With Shift held, a corner keeps the proportions.
   function dragRect(hit, s, dx, dy, keepRatio) {
-    if (hit === 'move') return { x: Math.round(s.x + dx), y: Math.round(s.y + dy), w: s.w, h: s.h };
+    const rot = s.rot || 0;
+    if (hit === 'move') return { x: Math.round(s.x + dx), y: Math.round(s.y + dy), w: s.w, h: s.h, rot };
     const MIN = 4;
+    const [c, sn] = trig(rot);
+    const ldx = dx * c + dy * sn, ldy = -dx * sn + dy * c; // the drag, in the frame's own directions
     let w = s.w, h = s.h;
-    if (hit.includes('e')) w = s.w + dx;
-    if (hit.includes('w')) w = s.w - dx;
-    if (hit.includes('s')) h = s.h + dy;
-    if (hit.includes('n')) h = s.h - dy;
+    if (hit.includes('e')) w = s.w + ldx;
+    if (hit.includes('w')) w = s.w - ldx;
+    if (hit.includes('s')) h = s.h + ldy;
+    if (hit.includes('n')) h = s.h - ldy;
     if (keepRatio && hit.length === 2) {
       const f = Math.max(w / s.w, h / s.h);
       w = s.w * f;
@@ -1297,7 +1393,11 @@
     }
     w = Math.round(Math.max(MIN, Math.min(MAX_PASTE_W, w)));
     h = Math.round(Math.max(MIN, Math.min(MAX_PASTE_H, h)));
-    return { x: hit.includes('w') ? s.x + s.w - w : s.x, y: hit.includes('n') ? s.y + s.h - h : s.y, w, h };
+    // edges relative to the old middle: the side that is not dragged keeps its place
+    const lx1 = hit.includes('w') ? s.w / 2 - w : -s.w / 2;
+    const ly1 = hit.includes('n') ? s.h / 2 - h : -s.h / 2;
+    const [mx, my] = rotPoint(s, lx1 + w / 2, ly1 + h / 2); // the new middle on the canvas
+    return { x: Math.round(mx - w / 2), y: Math.round(my - h / 2), w, h, rot };
   }
   // a snapshot as a little canvas with the empty parts see-through, for showing it while dragging
   function floatCanvas(img) {
@@ -1336,13 +1436,39 @@
           d[t] = d[t + 1] = d[t + 2] = d[t + 3] = 255;
         }
     }
-    sampleSnapshot(snap.img, it.w || snap.img.width, it.h || snap.img.height, it.fx, it.fy, (x, y, r, g, b) => {
+    if (it.rot) pasteTurned(d, snap.img, it);
+    else sampleSnapshot(snap.img, it.w || snap.img.width, it.h || snap.img.height, it.fx, it.fy, (x, y, r, g, b) => {
       const tx = it.dx + x, ty = it.dy + y;
       if (tx < 0 || tx >= W || ty < 0 || ty >= H) return;
       const t = (ty * W + tx) * 4;
       d[t] = r; d[t + 1] = g; d[t + 2] = b; d[t + 3] = 255;
     });
     ctx.putImageData(img, 0, 0);
+  }
+  // A turned piece: for every canvas pixel near it, look where in the piece that pixel comes from
+  // (so there are never gaps). Nearest pixel again, so the result is the same in every browser.
+  function pasteTurned(d, src, it) {
+    const sw = src.width, sh = src.height, sd = src.data;
+    const w = it.w || sw, h = it.h || sh;
+    const [c, s] = trig(it.rot);
+    const cx = it.dx + w / 2, cy = it.dy + h / 2;
+    const hw = (Math.abs(w * c) + Math.abs(h * s)) / 2, hh = (Math.abs(w * s) + Math.abs(h * c)) / 2;
+    const x0 = Math.max(0, Math.floor(cx - hw)), x1 = Math.min(W - 1, Math.ceil(cx + hw));
+    const y0 = Math.max(0, Math.floor(cy - hh)), y1 = Math.min(H - 1, Math.ceil(cy + hh));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const px = x + 0.5 - cx, py = y + 0.5 - cy;
+        const lx = px * c + py * s + w / 2, ly = -px * s + py * c + h / 2; // back to the unturned piece
+        if (lx < 0 || ly < 0 || lx >= w || ly >= h) continue;
+        let sx = Math.min(sw - 1, Math.floor((lx * sw) / w)), sy = Math.min(sh - 1, Math.floor((ly * sh) / h));
+        if (it.fx) sx = sw - 1 - sx;
+        if (it.fy) sy = sh - 1 - sy;
+        const i = (sy * sw + sx) * 4;
+        if (isBlank(sd[i], sd[i + 1], sd[i + 2])) continue;
+        const t = (y * W + x) * 4;
+        d[t] = sd[i]; d[t + 1] = sd[i + 1]; d[t + 2] = sd[i + 2]; d[t + 3] = 255;
+      }
+    }
   }
   // Draws stroke points from coordinate index `from` onward (0 = the whole stroke).
   function drawStroke(ctx, c, s, p, from) {
@@ -2573,7 +2699,7 @@
     $('#btn-copy-sel').addEventListener('click', () => Board.copySelection());
     $('#btn-paste').addEventListener('click', () => { if (!Board.cancelPaste()) Board.startPaste(); });
     $$('.tool[data-transform]').forEach((b) => b.addEventListener('click', () => Board.transform(b.dataset.transform)));
-    const TRANSFORM_KEYS = { h: 'fx', v: 'fy', '+': 'bigger', '=': 'bigger', '-': 'smaller' };
+    const TRANSFORM_KEYS = { h: 'fx', v: 'fy', '+': 'bigger', '=': 'bigger', '-': 'smaller', ',': 'rotl', '.': 'rotr' };
     document.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
