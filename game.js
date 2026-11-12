@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 17; // keep in sync with the ?v= in index.html
+  const VERSION = 18; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -143,7 +143,8 @@
       // 'clip' is the moment of copying: every screen takes a snapshot of that piece right then.
       // 'paste' puts that snapshot somewhere, whatever happened to the canvas in between.
       case 'clip': log.push({ k: 'clip', id: op.id, x: op.x, y: op.y, w: op.w, h: op.h }); break;
-      case 'paste': log.push({ k: 'paste', id: op.id, clip: op.clip, dx: op.dx, dy: op.dy }); break;
+      // w/h: pasted at another size; fx/fy: mirrored; cut: the original spot is emptied first
+      case 'paste': log.push({ k: 'paste', id: op.id, clip: op.clip, dx: op.dx, dy: op.dy, w: op.w, h: op.h, fx: !!op.fx, fy: !!op.fy, cut: !!op.cut }); break;
       case 'item': log.push(clone(op.it)); break;
       case 'undo':
         // a snapshot taken after the step being undone would no longer match: drop it as well
@@ -161,9 +162,14 @@
     if (it.k === 'fill') return isCol(it.c) && isNum(it.x) && isNum(it.y);
     if (it.k === 'shape') return SHAPES.includes(it.sh) && isCol(it.c) && SIZES.includes(it.s) && [it.x1, it.y1, it.x2, it.y2].every(isNum);
     // a pasted piece may hang over the edge of the canvas
-    if (it.k === 'paste') return isId(it.clip) && Number.isInteger(it.dx) && Number.isInteger(it.dy) && Math.abs(it.dx) <= W && Math.abs(it.dy) <= H;
+    if (it.k === 'paste') {
+      const size = (v, max) => v === undefined || v === null || (Number.isInteger(v) && v >= 1 && v <= max);
+      return isId(it.clip) && Number.isInteger(it.dx) && Number.isInteger(it.dy) && Math.abs(it.dx) <= 2 * W && Math.abs(it.dy) <= 2 * H
+        && size(it.w, MAX_PASTE_W) && size(it.h, MAX_PASTE_H);
+    }
     return false;
   }
+  const MAX_PASTE_W = 2 * W, MAX_PASTE_H = 2 * H; // a piece can be enlarged to at most twice the canvas
   const isId = (s) => typeof s === 'string' && s.length > 0 && s.length <= 64;
   // the copied piece itself always lies inside the canvas
   const validClip = (op) => isId(op.id) && [op.x, op.y, op.w, op.h].every(Number.isInteger)
@@ -849,6 +855,7 @@
       this.selection = null;
       this.clip = null;
       this.clips = {};
+      this.live = null;
       this.pasting = null;
       this.pending = [];
       this.tool = 'pen'; // every turn starts with the pen, not a leftover fill bucket
@@ -904,16 +911,72 @@
       const snap = this.clip && this.clips[this.clip.id];
       if (!this.canDraw() || !snap) return false;
       const { x, y, w, h } = this.clip;
-      const data = new ImageData(new Uint8ClampedArray(snap.data), w, h);
-      const d = data.data;
-      for (let i = 0; i < d.length; i += 4) if (isBlank(d[i], d[i + 1], d[i + 2])) d[i + 3] = 0;
-      const img = document.createElement('canvas');
-      img.width = w;
-      img.height = h;
-      img.getContext('2d').putImageData(data, 0, 0);
-      this.pasting = { img, w, h, x: Math.min(W - w, x + 24), y: Math.min(H - h, y + 24) };
-      this.drawOverlay();
+      this.pasting = { scale: 1, fx: false, fy: false, w, h, img: null, x: Math.min(W - w, x + 24), y: Math.min(H - h, y + 24) };
+      this.refloat();
       return true;
+    },
+    // (re)builds the floating piece at its current size and mirroring, keeping its middle in place
+    refloat() {
+      const p = this.pasting;
+      const snap = this.clips[this.clip.id];
+      const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+      p.w = Math.max(1, Math.round(this.clip.w * p.scale));
+      p.h = Math.max(1, Math.round(this.clip.h * p.scale));
+      p.x = Math.round(cx - p.w / 2);
+      p.y = Math.round(cy - p.h / 2);
+      const data = new ImageData(p.w, p.h); // starts fully see-through
+      const d = data.data;
+      sampleSnapshot(snap.img, p.w, p.h, p.fx, p.fy, (tx, ty, r, g, b) => {
+        const t = (ty * p.w + tx) * 4;
+        d[t] = r; d[t + 1] = g; d[t + 2] = b; d[t + 3] = 255;
+      });
+      p.img = document.createElement('canvas');
+      p.img.width = p.w;
+      p.img.height = p.h;
+      p.img.getContext('2d').putImageData(data, 0, 0);
+      this.drawOverlay();
+    },
+    canTransform() { return this.canDraw() && (!!this.pasting || (this.tool === 'select' && !!this.selection)); },
+    // Mirror or resize. On a floating piece it changes that piece. On a selection it changes the
+    // drawing on the spot: the selected part is lifted, changed and put back in one undo step.
+    // Pressing again keeps working from the original pixels, so it doesn't get blurrier each time.
+    transform(what) {
+      if (!this.canTransform()) return;
+      const next = (t, base) => {
+        const o = { scale: t.scale, fx: t.fx, fy: t.fy };
+        if (what === 'fx') o.fx = !o.fx;
+        if (what === 'fy') o.fy = !o.fy;
+        if (what === 'bigger') o.scale *= 1.25;
+        if (what === 'smaller') o.scale /= 1.25;
+        const w = Math.round(base.w * o.scale), h = Math.round(base.h * o.scale);
+        if (w < 4 || h < 4 || w > MAX_PASTE_W || h > MAX_PASTE_H) return null; // as small or large as it gets
+        return o;
+      };
+      if (this.pasting) {
+        const o = next(this.pasting, this.clip);
+        if (!o) return;
+        Object.assign(this.pasting, o);
+        return this.refloat();
+      }
+      let L = this.live;
+      const last = this.log[this.log.length - 1];
+      const continuing = L && last && last.id === L.pasteId;
+      if (!continuing) {
+        const s = this.selection;
+        L = { clip: this.newId(), x: s.x, y: s.y, w: s.w, h: s.h, scale: 1, fx: false, fy: false, pasteId: null };
+      }
+      const o = next(L, L);
+      if (!o) return;
+      if (continuing) this.local({ k: 'undo' }); // replace the previous version of this same change
+      else this.local({ k: 'clip', id: L.clip, x: L.x, y: L.y, w: L.w, h: L.h });
+      Object.assign(L, o);
+      const w = Math.round(L.w * L.scale), h = Math.round(L.h * L.scale);
+      const dx = Math.round(L.x + L.w / 2 - w / 2), dy = Math.round(L.y + L.h / 2 - h / 2);
+      L.pasteId = this.newId();
+      this.live = L;
+      this.local({ k: 'paste', id: L.pasteId, clip: L.clip, dx, dy, w, h, fx: L.fx, fy: L.fy, cut: true });
+      this.selection = this.frameBetween([dx, dy], [dx + w, dy + h]);
+      this.drawOverlay();
     },
     cancelPaste() {
       if (!this.pasting) return false;
@@ -1001,10 +1064,10 @@
       const [x, y] = this.pos(e);
       if (this.pasting) {
         // place the piece with its middle under the pointer; the clipboard stays for another paste
-        const { w, h } = this.pasting;
+        const { w, h, fx, fy } = this.pasting;
         const c = this.clip;
         this.pasting = null;
-        this.local({ k: 'paste', id: this.newId(), clip: c.id, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2) });
+        this.local({ k: 'paste', id: this.newId(), clip: c.id, dx: Math.round(x - w / 2), dy: Math.round(y - h / 2), w, h, fx, fy });
         this.drawOverlay();
         return;
       }
@@ -1012,6 +1075,7 @@
         this.canvas.setPointerCapture(e.pointerId);
         this.selStart = [x, y];
         this.selection = null;
+        this.live = null; // a new frame starts a new change
         this.drawOverlay();
         return;
       }
@@ -1101,28 +1165,44 @@
     if (item.k === 'stroke') drawStroke(ctx, item.c, item.s, item.p, 0);
     else if (item.k === 'fill') floodFill(ctx, item.x, item.y, item.c);
     else if (item.k === 'shape') drawShape(ctx, item);
-    else if (item.k === 'clip') { if (clips) clips[item.id] = ctx.getImageData(item.x, item.y, item.w, item.h); }
-    else if (item.k === 'paste') { if (clips && clips[item.clip]) pasteSnapshot(ctx, clips[item.clip], item.dx, item.dy); }
+    else if (item.k === 'clip') { if (clips) clips[item.id] = { img: ctx.getImageData(item.x, item.y, item.w, item.h), x: item.x, y: item.y }; }
+    else if (item.k === 'paste') { if (clips && clips[item.clip]) pasteSnapshot(ctx, clips[item.clip], item); }
   }
   // Empty (white) canvas counts as see-through when a piece is copied, so pasting a drawing
   // next to or over another one doesn't wipe it out with a white box.
   const isBlank = (r, g, b) => r >= 250 && g >= 250 && b >= 250;
-  function pasteSnapshot(ctx, snap, dx, dy) {
-    const img = ctx.getImageData(0, 0, W, H);
-    const d = img.data;
-    const src = snap.data;
-    for (let y = 0; y < snap.height; y++) {
-      const ty = dy + y;
-      if (ty < 0 || ty >= H) continue;
-      for (let x = 0; x < snap.width; x++) {
-        const tx = dx + x;
-        if (tx < 0 || tx >= W) continue;
-        const s = (y * snap.width + x) * 4;
-        if (isBlank(src[s], src[s + 1], src[s + 2])) continue;
-        const t = (ty * W + tx) * 4;
-        d[t] = src[s]; d[t + 1] = src[s + 1]; d[t + 2] = src[s + 2]; d[t + 3] = 255;
+  // Walks a snapshot at a target size, optionally mirrored, calling put() for every drawn pixel.
+  // Whole-number maths only (nearest pixel), so every browser ends up with identical pixels.
+  function sampleSnapshot(img, tw, th, fx, fy, put) {
+    const sw = img.width, sh = img.height, src = img.data;
+    for (let y = 0; y < th; y++) {
+      let sy = Math.floor((y * sh) / th);
+      if (fy) sy = sh - 1 - sy;
+      for (let x = 0; x < tw; x++) {
+        let sx = Math.floor((x * sw) / tw);
+        if (fx) sx = sw - 1 - sx;
+        const s = (sy * sw + sx) * 4;
+        if (!isBlank(src[s], src[s + 1], src[s + 2])) put(x, y, src[s], src[s + 1], src[s + 2]);
       }
     }
+  }
+  function pasteSnapshot(ctx, snap, it) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    if (it.cut) {
+      // moving instead of copying: empty the spot the piece came from
+      for (let y = snap.y; y < snap.y + snap.img.height; y++)
+        for (let x = snap.x; x < snap.x + snap.img.width; x++) {
+          const t = (y * W + x) * 4;
+          d[t] = d[t + 1] = d[t + 2] = d[t + 3] = 255;
+        }
+    }
+    sampleSnapshot(snap.img, it.w || snap.img.width, it.h || snap.img.height, it.fx, it.fy, (x, y, r, g, b) => {
+      const tx = it.dx + x, ty = it.dy + y;
+      if (tx < 0 || tx >= W || ty < 0 || ty >= H) return;
+      const t = (ty * W + tx) * 4;
+      d[t] = r; d[t + 1] = g; d[t + 2] = b; d[t + 3] = 255;
+    });
     ctx.putImageData(img, 0, 0);
   }
   // Draws stroke points from coordinate index `from` onward (0 = the whole stroke).
@@ -2043,6 +2123,8 @@
     $('#btn-copy-sel').disabled = !Board.selection || Board.tool !== 'select';
     $('#btn-paste').disabled = !Board.clip;
     $('#btn-paste').classList.toggle('active', !!Board.pasting);
+    const can = !!Board.pasting || (Board.tool === 'select' && !!Board.selection);
+    $$('.tool[data-transform]').forEach((b) => (b.disabled = !can));
   }
   function paintToolbar() {
     const custom = !PALETTE.includes(Board.color);
@@ -2350,6 +2432,8 @@
     const TOOL_KEYS = { b: 'pen', p: 'pen', e: 'eraser', f: 'fill', l: 'line', r: 'rect', o: 'ellipse', i: 'picker', s: 'select' };
     $('#btn-copy-sel').addEventListener('click', () => Board.copySelection());
     $('#btn-paste').addEventListener('click', () => { if (!Board.cancelPaste()) Board.startPaste(); });
+    $$('.tool[data-transform]').forEach((b) => b.addEventListener('click', () => Board.transform(b.dataset.transform)));
+    const TRANSFORM_KEYS = { h: 'fx', v: 'fy', '+': 'bigger', '=': 'bigger', '-': 'smaller' };
     document.addEventListener('keydown', (e) => {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -2363,6 +2447,7 @@
           if (!Board.cancelPaste() && Board.selection) { Board.selection = null; Board.drawOverlay(); }
           return;
         }
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && TRANSFORM_KEYS[key] && Board.canTransform()) { e.preventDefault(); return Board.transform(TRANSFORM_KEYS[key]); }
         if (!e.ctrlKey && !e.metaKey && !e.altKey && TOOL_KEYS[key]) return setTool(TOOL_KEYS[key]);
         if (!e.ctrlKey && !e.metaKey && key >= '1' && key <= '4') { Board.size = SIZES[+key - 1]; return paintToolbar(); }
         return;
