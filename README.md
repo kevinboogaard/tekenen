@@ -26,7 +26,7 @@ woordmodus normaal/verborgen · max. spelers (2–16).
 
 ## Tekengereedschap
 20 kleuren + eigen kleur · 4 diktes · pen · gum · emmer · lijn · rechthoek · ellips ·
-pipet · selecteren, kopiëren en plakken · spiegelen en vergroten/verkleinen · ongedaan maken · opnieuw · alles wissen.
+pipet · selecteren, kopiëren en plakken · verplaatsen en schalen door te slepen (zoals in Paint) · spiegelen · ongedaan maken · opnieuw · alles wissen.
 Sneltoetsen: B pen, E gum, F emmer, L lijn, R rechthoek, O ellips, I pipet, S selecteren, Ctrl+C / Ctrl+V, H/V spiegelen, +/- grootte,
 1–4 dikte, Ctrl+Z / Ctrl+Y.
 

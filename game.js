@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 18; // keep in sync with the ?v= in index.html
+  const VERSION = 19; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -856,6 +856,7 @@
       this.clip = null;
       this.clips = {};
       this.live = null;
+      this.grab = null;
       this.pasting = null;
       this.pending = [];
       this.tool = 'pen'; // every turn starts with the pen, not a leftover fill bucket
@@ -884,21 +885,92 @@
         pv.strokeRect(x + 0.5, y + 0.5, w, h);
         pv.setLineDash([]);
       };
+      // the little squares you grab to resize, like in Paint
+      const handles = (r) => {
+        const hs = this.screenPx(9);
+        pv.lineWidth = Math.max(1, this.screenPx(1.5));
+        pv.fillStyle = '#ffffff';
+        pv.strokeStyle = '#23262b';
+        for (const [hx, hy] of handlePoints(r)) {
+          pv.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+          pv.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
+        }
+      };
       if (this.pasting) {
         const p = this.pasting;
         pv.drawImage(p.img, p.x, p.y);
         frame(p.x, p.y, p.w, p.h);
+      } else if (this.grab) {
+        // while dragging: hide the piece where it was and show it at its new place and size
+        const { L, start, rect: r } = this.grab;
+        pv.fillStyle = '#ffffff';
+        pv.fillRect(start.x, start.y, start.w, start.h);
+        pv.save();
+        pv.imageSmoothingEnabled = false;
+        pv.translate(r.x + (L.fx ? r.w : 0), r.y + (L.fy ? r.h : 0));
+        pv.scale(L.fx ? -1 : 1, L.fy ? -1 : 1);
+        pv.drawImage(L.float, 0, 0, r.w, r.h);
+        pv.restore();
+        frame(r.x, r.y, r.w, r.h);
+        handles(r);
       } else if (this.tool === 'select' && this.selection) {
         const s = this.selection;
         frame(s.x, s.y, s.w, s.h);
+        if (!this.selStart) handles(s);
       }
       paintSelectionButtons();
+    },
+    // a size in screen pixels, expressed in canvas pixels (the canvas is shown scaled)
+    screenPx(n) { return (n * W) / (this.canvas.getBoundingClientRect().width || W); },
+    // which part of the selection is under the pointer: a handle ('nw', 'e', ...), 'move' or nothing
+    hitSelection(x, y) {
+      const s = this.selection;
+      if (!s) return null;
+      const tol = this.screenPx(10);
+      const names = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+      const pts = handlePoints(s);
+      // on a small frame the handles overlap: the nearest one wins
+      let best = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const dist = Math.hypot(x - pts[i][0], y - pts[i][1]);
+        if (Math.abs(x - pts[i][0]) <= tol && Math.abs(y - pts[i][1]) <= tol && dist < bestDist) { best = names[i]; bestDist = dist; }
+      }
+      if (best) return best;
+      return x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h ? 'move' : null;
+    },
+    // The change in progress on this selection (so the next drag or click continues it), or a
+    // fresh one. A change is: lift the selected piece, then put it back moved, resized or mirrored.
+    liveFor() {
+      const last = this.log[this.log.length - 1];
+      if (this.live && last && last.id === this.live.pasteId) return this.live;
+      const sel = this.selection;
+      const s = this.frameBetween([sel.x, sel.y], [sel.x + sel.w, sel.y + sel.h]);
+      if (s.w < 1 || s.h < 1) return null;
+      return { clip: this.newId(), bx: s.x, by: s.y, bw: s.w, bh: s.h, x: s.x, y: s.y, w: s.w, h: s.h, fx: false, fy: false, pasteId: null, float: null };
+    },
+    // Put the lifted piece at rectangle r. Replaces the previous version of the same change, so
+    // however often you drag or click, it stays one undo step and is always made from the original.
+    commitLive(L, r) {
+      const w = Math.round(r.w), h = Math.round(r.h);
+      if (w < 4 || h < 4 || w > MAX_PASTE_W || h > MAX_PASTE_H) return false; // as small or large as it gets
+      if (L.pasteId) this.local({ k: 'undo' });
+      else this.local({ k: 'clip', id: L.clip, x: L.bx, y: L.by, w: L.bw, h: L.bh });
+      Object.assign(L, { x: Math.round(r.x), y: Math.round(r.y), w, h, fx: !!r.fx, fy: !!r.fy, pasteId: this.newId() });
+      this.live = L;
+      this.local({ k: 'paste', id: L.pasteId, clip: L.clip, dx: L.x, dy: L.y, w, h, fx: L.fx, fy: L.fy, cut: true });
+      this.selection = { x: L.x, y: L.y, w, h };
+      this.drawOverlay();
+      return true;
     },
     // Copying takes a snapshot right now, on every player's screen. Whatever is drawn, erased
     // or moved afterwards, pasting always gives this snapshot.
     copySelection() {
       if (!this.canDraw() || !this.selection) return false;
-      const s = this.selection;
+      // a moved or enlarged frame can hang over the edge: only the part on the canvas is copied
+      const sel = this.selection;
+      const s = this.frameBetween([sel.x, sel.y], [sel.x + sel.w, sel.y + sel.h]);
+      if (s.w < 1 || s.h < 1) return false;
       const id = this.newId();
       this.clip = { id, w: s.w, h: s.h, x: s.x, y: s.y };
       this.local({ k: 'clip', id, x: s.x, y: s.y, w: s.w, h: s.h });
@@ -958,25 +1030,20 @@
         Object.assign(this.pasting, o);
         return this.refloat();
       }
-      let L = this.live;
-      const last = this.log[this.log.length - 1];
-      const continuing = L && last && last.id === L.pasteId;
-      if (!continuing) {
-        const s = this.selection;
-        L = { clip: this.newId(), x: s.x, y: s.y, w: s.w, h: s.h, scale: 1, fx: false, fy: false, pasteId: null };
+      const L = this.liveFor();
+      if (!L) return;
+      const r = { x: L.x, y: L.y, w: L.w, h: L.h, fx: L.fx, fy: L.fy };
+      if (what === 'fx') r.fx = !r.fx;
+      if (what === 'fy') r.fy = !r.fy;
+      if (what === 'bigger' || what === 'smaller') {
+        // grow or shrink around the middle
+        const f = what === 'bigger' ? 1.25 : 0.8;
+        r.w = L.w * f;
+        r.h = L.h * f;
+        r.x = L.x + (L.w - r.w) / 2;
+        r.y = L.y + (L.h - r.h) / 2;
       }
-      const o = next(L, L);
-      if (!o) return;
-      if (continuing) this.local({ k: 'undo' }); // replace the previous version of this same change
-      else this.local({ k: 'clip', id: L.clip, x: L.x, y: L.y, w: L.w, h: L.h });
-      Object.assign(L, o);
-      const w = Math.round(L.w * L.scale), h = Math.round(L.h * L.scale);
-      const dx = Math.round(L.x + L.w / 2 - w / 2), dy = Math.round(L.y + L.h / 2 - h / 2);
-      L.pasteId = this.newId();
-      this.live = L;
-      this.local({ k: 'paste', id: L.pasteId, clip: L.clip, dx, dy, w, h, fx: L.fx, fy: L.fy, cut: true });
-      this.selection = this.frameBetween([dx, dy], [dx + w, dy + h]);
-      this.drawOverlay();
+      this.commitLive(L, r);
     },
     cancelPaste() {
       if (!this.pasting) return false;
@@ -1033,6 +1100,12 @@
       while (i >= 0 && this.log[i].k === 'clip') dropped.push(this.log[i--].id);
       if (i < 0) return; // nothing drawn to undo
       this.redoStack.push(clone(this.log[i]));
+      if (this.live && this.log[i].id === this.live.pasteId) {
+        // undoing a move/resize: the frame goes back around the piece where it was
+        const L = this.live;
+        this.selection = { x: L.bx, y: L.by, w: L.bw, h: L.bh };
+        this.live = null;
+      }
       if (dropped.length) {
         this.redoStack = this.redoStack.filter((it) => !(it.k === 'paste' && dropped.includes(it.clip)));
         if (this.clip && dropped.includes(this.clip.id)) {
@@ -1073,6 +1146,16 @@
       }
       if (this.tool === 'select') {
         this.canvas.setPointerCapture(e.pointerId);
+        // grabbing a handle resizes, grabbing inside the frame moves, anywhere else starts a new frame
+        const hit = this.hitSelection(x, y);
+        const L = hit && this.liveFor();
+        if (L) {
+          if (!L.float) L.float = floatCanvas(L.pasteId ? this.clips[L.clip].img : this.ctx.getImageData(L.bx, L.by, L.bw, L.bh));
+          const start = { x: L.x, y: L.y, w: L.w, h: L.h };
+          this.grab = { hit, L, px: x, py: y, start, rect: { ...start } };
+          this.drawOverlay();
+          return;
+        }
         this.selStart = [x, y];
         this.selection = null;
         this.live = null; // a new frame starts a new change
@@ -1110,10 +1193,22 @@
         this.drawOverlay();
         return;
       }
+      if (this.grab) {
+        const [x, y] = this.pos(e);
+        const g = this.grab;
+        g.rect = dragRect(g.hit, g.start, x - g.px, y - g.py, e.shiftKey);
+        this.drawOverlay();
+        return;
+      }
       if (this.selStart) {
         this.selection = this.frameBetween(this.selStart, this.pos(e));
         this.drawOverlay();
         return;
+      }
+      if (this.tool === 'select' && this.canDraw() && !this.drawing) {
+        // show what a click here would do
+        const hit = this.hitSelection(...this.pos(e));
+        this.canvas.style.cursor = hit ? HANDLE_CURSORS[hit] : '';
       }
       if (this.shapeStart) {
         const [x, y] = this.pos(e);
@@ -1132,6 +1227,13 @@
       }
     },
     up(e) {
+      if (this.grab) {
+        const { L, start, rect: r } = this.grab;
+        this.grab = null;
+        const changed = r.x !== start.x || r.y !== start.y || r.w !== start.w || r.h !== start.h;
+        if (!changed || !this.canDraw() || !this.commitLive(L, { ...r, fx: L.fx, fy: L.fy })) this.drawOverlay();
+        return;
+      }
       if (this.selStart) {
         if (e && e.clientX !== undefined) this.selection = this.frameBetween(this.selStart, this.pos(e));
         this.selStart = null;
@@ -1171,6 +1273,43 @@
   // Empty (white) canvas counts as see-through when a piece is copied, so pasting a drawing
   // next to or over another one doesn't wipe it out with a white box.
   const isBlank = (r, g, b) => r >= 250 && g >= 250 && b >= 250;
+  // ---- dragging a selection like in Paint
+  const HANDLE_CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', move: 'move' };
+  // the eight grab points of a frame, clockwise from the top-left corner
+  function handlePoints(r) {
+    const x2 = r.x + r.w, y2 = r.y + r.h, mx = r.x + r.w / 2, my = r.y + r.h / 2;
+    return [[r.x, r.y], [mx, r.y], [x2, r.y], [x2, my], [x2, y2], [mx, y2], [r.x, y2], [r.x, my]];
+  }
+  // The frame after dragging `hit` by (dx, dy). The opposite side stays where it is.
+  // With Shift held, a corner keeps the proportions.
+  function dragRect(hit, s, dx, dy, keepRatio) {
+    if (hit === 'move') return { x: Math.round(s.x + dx), y: Math.round(s.y + dy), w: s.w, h: s.h };
+    const MIN = 4;
+    let w = s.w, h = s.h;
+    if (hit.includes('e')) w = s.w + dx;
+    if (hit.includes('w')) w = s.w - dx;
+    if (hit.includes('s')) h = s.h + dy;
+    if (hit.includes('n')) h = s.h - dy;
+    if (keepRatio && hit.length === 2) {
+      const f = Math.max(w / s.w, h / s.h);
+      w = s.w * f;
+      h = s.h * f;
+    }
+    w = Math.round(Math.max(MIN, Math.min(MAX_PASTE_W, w)));
+    h = Math.round(Math.max(MIN, Math.min(MAX_PASTE_H, h)));
+    return { x: hit.includes('w') ? s.x + s.w - w : s.x, y: hit.includes('n') ? s.y + s.h - h : s.y, w, h };
+  }
+  // a snapshot as a little canvas with the empty parts see-through, for showing it while dragging
+  function floatCanvas(img) {
+    const data = new ImageData(new Uint8ClampedArray(img.data), img.width, img.height);
+    const d = data.data;
+    for (let i = 0; i < d.length; i += 4) if (isBlank(d[i], d[i + 1], d[i + 2])) d[i + 3] = 0;
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    c.getContext('2d').putImageData(data, 0, 0);
+    return c;
+  }
   // Walks a snapshot at a target size, optionally mirrored, calling put() for every drawn pixel.
   // Whole-number maths only (nearest pixel), so every browser ends up with identical pixels.
   function sampleSnapshot(img, tw, th, fx, fy, put) {
@@ -2115,6 +2254,7 @@
   function setTool(t) {
     Board.tool = t;
     Board.pasting = null; // picking a tool cancels a paste that was still floating
+    Board.grab = null;
     $('#canvas').classList.toggle('fill-cursor', t === 'fill' || t === 'picker');
     paintToolbar();
     Board.drawOverlay();
