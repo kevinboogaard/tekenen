@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 20; // keep in sync with the ?v= in index.html
+  const VERSION = 21; // keep in sync with the ?v= in index.html
   const PREFIX = 'tekenraad-nl-room-';
   // PeerJS's own defaults plus extra STUN servers, so more networks can connect directly.
   const PEER_OPTIONS = {
@@ -2584,7 +2584,7 @@
       let understood = false;
       const num = text.match(/\d+/);
       if (num) {
-        const n = String(clampInt(num[0], 1, 100, 20));
+        const n = String(clampInt(num[0], 1, MAX_WORDS_PER_PLAYER, 20));
         if (![...$('#gen-count').options].some((o) => o.value === n)) $('#gen-count').add(new Option(n, n));
         $('#gen-count').value = n;
         understood = true;
@@ -2612,7 +2612,7 @@
       }
       const themes = genTheme.value === 'all' ? bank : bank.filter((t) => t.id === genTheme.value);
       const levels = $('#gen-level').value === 'all' ? ['easy', 'medium', 'hard'] : [$('#gen-level').value];
-      const count = clampInt($('#gen-count').value, 1, 100, 20);
+      const count = clampInt($('#gen-count').value, 1, MAX_WORDS_PER_PLAYER, 20);
       const current = parseWords($('#words-input').value);
       const have = new Set(current.map(compact));
       const pool = [];
@@ -2628,7 +2628,9 @@
       }
       $('#words-input').value = current.concat(picked).join(', ');
       saveWords();
-      msg.textContent = `✓ ${picked.length} woord${picked.length === 1 ? '' : 'en'} toegevoegd${picked.length < count ? ' — meer zijn er niet voor deze keuze' : ''}.`;
+      // fewer than asked: either the list is now full, or this choice has no more words to give
+      const why = picked.length >= count ? '' : picked.length === room ? ` — je lijst zit nu vol (${MAX_WORDS_PER_PLAYER})` : ' — meer zijn er niet voor deze keuze';
+      msg.textContent = `✓ ${picked.length} woord${picked.length === 1 ? '' : 'en'} toegevoegd${why}.`;
     };
     $('#btn-generate').addEventListener('click', generate);
     $('#gen-ask').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); generate(); } });
